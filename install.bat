@@ -4,8 +4,8 @@ title multi-agent-shogun Installer
 
 echo.
 echo   +============================================================+
-echo   |  [SHOGUN] multi-agent-shogun - Auto Installer              |
-echo   |           全自動セットアップ                               |
+echo   ^|  [SHOGUN] multi-agent-shogun - Auto Installer              ^|
+echo   ^|           全自動セットアップ                               ^|
 echo   +============================================================+
 echo.
 
@@ -75,8 +75,8 @@ wsl --install -d Ubuntu --no-launch
 
 echo.
 echo   +============================================================+
-echo   |  [NOTE] Ubuntu initial setup required!                     |
-echo   |         Ubuntu の初期設定が必要です                        |
+echo   ^|  [NOTE] Ubuntu initial setup required!                     ^|
+echo   ^|         Ubuntu の初期設定が必要です                        ^|
 echo   +============================================================+
 echo.
 echo   1. Open Ubuntu from Start Menu
@@ -95,8 +95,8 @@ exit /b 0
 REM Ubuntu exists but initial setup not completed
 echo.
 echo   +============================================================+
-echo   |  [WARN] Ubuntu initial setup required!                     |
-echo   |         Ubuntu の初期設定が必要です                        |
+echo   ^|  [WARN] Ubuntu initial setup required!                     ^|
+echo   ^|         Ubuntu の初期設定が必要です                        ^|
 echo   +============================================================+
 echo.
 echo   1. Open Ubuntu from Start Menu
@@ -161,21 +161,21 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo   +============================================================+
-echo   |  [OK] Installation completed!                              |
-echo   |       インストール完了！                                    |
+echo   ^|  [OK] Installation completed!                              ^|
+echo   ^|       インストール完了！                                    ^|
 echo   +============================================================+
 echo.
 echo   +------------------------------------------------------------+
-echo   |  [START] NEXT: Start the system                            |
-echo   |          次のステップ: システム起動                        |
+echo   ^|  [START] NEXT: Start the system                            ^|
+echo   ^|          次のステップ: システム起動                        ^|
 echo   +------------------------------------------------------------+
-echo   |                                                            |
-echo   |  Open WSL terminal and run:                                |
-echo   |  WSL ターミナルを開いて実行:                               |
-echo   |                                                            |
-echo   |    cd "%WSL_PATH%"
-echo   |    ./shutsujin_departure.sh                                |
-echo   |                                                            |
+echo   ^|                                                            ^|
+echo   ^|  Open WSL terminal and run:                                ^|
+echo   ^|  WSL ターミナルを開いて実行:                               ^|
+echo   ^|                                                            ^|
+echo   ^|    cd "%WSL_PATH%"
+echo   ^|    ./shutsujin_departure.sh                                ^|
+echo   ^|                                                            ^|
 echo   +------------------------------------------------------------+
 echo.
 pause
