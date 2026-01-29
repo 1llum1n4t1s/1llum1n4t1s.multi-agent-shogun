@@ -350,6 +350,11 @@ if [ ! -f "$SCRIPT_DIR/config/settings.yaml" ]; then
 # その他の言語コード（es, zh, ko, fr, de 等）も対応
 language: ja
 
+# シェル設定
+# bash: bash用プロンプト（デフォルト）
+# zsh: zsh用プロンプト
+shell: bash
+
 # スキル設定
 skill:
   # スキル保存先（スキル名に shogun- プレフィックスを付けて保存）
@@ -606,8 +611,12 @@ echo "  出陣（全エージェント起動）:"
 echo "     ./shutsujin_departure.sh"
 echo ""
 echo "  オプション:"
-echo "     ./shutsujin_departure.sh -s   # セットアップのみ（Claude手動起動）"
-echo "     ./shutsujin_departure.sh -t   # Windows Terminalタブ展開"
+echo "     ./shutsujin_departure.sh -s            # セットアップのみ（Claude手動起動）"
+echo "     ./shutsujin_departure.sh -t            # Windows Terminalタブ展開"
+echo "     ./shutsujin_departure.sh -shell bash   # bash用プロンプトで起動"
+echo "     ./shutsujin_departure.sh -shell zsh    # zsh用プロンプトで起動"
+echo ""
+echo "  ※ シェル設定は config/settings.yaml の shell: でも変更可能です"
 echo ""
 echo "  詳細は README.md を参照してください。"
 echo ""

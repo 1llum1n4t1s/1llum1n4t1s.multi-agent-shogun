@@ -19,6 +19,12 @@ if [ -f "./config/settings.yaml" ]; then
     LANG_SETTING=$(grep "^language:" ./config/settings.yaml 2>/dev/null | awk '{print $2}' || echo "ja")
 fi
 
+# シェル設定を読み取り（デフォルト: bash）
+SHELL_SETTING="bash"
+if [ -f "./config/settings.yaml" ]; then
+    SHELL_SETTING=$(grep "^shell:" ./config/settings.yaml 2>/dev/null | awk '{print $2}' || echo "bash")
+fi
+
 # 色付きログ関数（戦国風）
 log_info() {
     echo -e "\033[1;33m【報】\033[0m $1"
@@ -33,10 +39,41 @@ log_war() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# プロンプト生成関数（bash/zsh対応）
+# ───────────────────────────────────────────────────────────────────────────────
+# 使用法: generate_prompt "ラベル" "色" "シェル"
+# 色: red, green, blue, magenta, cyan, yellow
+# ═══════════════════════════════════════════════════════════════════════════════
+generate_prompt() {
+    local label="$1"
+    local color="$2"
+    local shell_type="$3"
+
+    if [ "$shell_type" == "zsh" ]; then
+        # zsh用: %F{color}%B...%b%f 形式
+        echo "(%F{${color}}%B${label}%b%f) %F{green}%B%~%b%f%# "
+    else
+        # bash用: \[\033[...m\] 形式
+        local color_code
+        case "$color" in
+            red)     color_code="1;31" ;;
+            green)   color_code="1;32" ;;
+            yellow)  color_code="1;33" ;;
+            blue)    color_code="1;34" ;;
+            magenta) color_code="1;35" ;;
+            cyan)    color_code="1;36" ;;
+            *)       color_code="1;37" ;;  # white (default)
+        esac
+        echo "(\[\033[${color_code}m\]${label}\[\033[0m\]) \[\033[1;32m\]\w\[\033[0m\]\$ "
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # オプション解析
 # ═══════════════════════════════════════════════════════════════════════════════
 SETUP_ONLY=false
 OPEN_TERMINAL=false
+SHELL_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -48,6 +85,15 @@ while [[ $# -gt 0 ]]; do
             OPEN_TERMINAL=true
             shift
             ;;
+        -shell|--shell)
+            if [[ -n "$2" && "$2" != -* ]]; then
+                SHELL_OVERRIDE="$2"
+                shift 2
+            else
+                echo "エラー: -shell オプションには bash または zsh を指定してください"
+                exit 1
+            fi
+            ;;
         -h|--help)
             echo ""
             echo "🏯 multi-agent-shogun 出陣スクリプト"
@@ -55,14 +101,18 @@ while [[ $# -gt 0 ]]; do
             echo "使用方法: ./shutsujin_departure.sh [オプション]"
             echo ""
             echo "オプション:"
-            echo "  -s, --setup-only  tmuxセッションのセットアップのみ（Claude起動なし）"
-            echo "  -t, --terminal    Windows Terminal で新しいタブを開く"
-            echo "  -h, --help        このヘルプを表示"
+            echo "  -s, --setup-only    tmuxセッションのセットアップのみ（Claude起動なし）"
+            echo "  -t, --terminal      Windows Terminal で新しいタブを開く"
+            echo "  -shell, --shell SH  シェルを指定（bash または zsh）"
+            echo "                      未指定時は config/settings.yaml の設定を使用"
+            echo "  -h, --help          このヘルプを表示"
             echo ""
             echo "例:"
-            echo "  ./shutsujin_departure.sh      # 全エージェント起動（通常の出陣）"
-            echo "  ./shutsujin_departure.sh -s   # セットアップのみ（手動でClaude起動）"
-            echo "  ./shutsujin_departure.sh -t   # 全エージェント起動 + ターミナルタブ展開"
+            echo "  ./shutsujin_departure.sh              # 全エージェント起動（通常の出陣）"
+            echo "  ./shutsujin_departure.sh -s           # セットアップのみ（手動でClaude起動）"
+            echo "  ./shutsujin_departure.sh -t           # 全エージェント起動 + ターミナルタブ展開"
+            echo "  ./shutsujin_departure.sh -shell bash  # bash用プロンプトで起動"
+            echo "  ./shutsujin_departure.sh -shell zsh   # zsh用プロンプトで起動"
             echo ""
             echo "エイリアス:"
             echo "  csst  → cd /mnt/c/tools/multi-agent-shogun && ./shutsujin_departure.sh"
@@ -78,6 +128,16 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# シェル設定のオーバーライド（コマンドラインオプション優先）
+if [ -n "$SHELL_OVERRIDE" ]; then
+    if [[ "$SHELL_OVERRIDE" == "bash" || "$SHELL_OVERRIDE" == "zsh" ]]; then
+        SHELL_SETTING="$SHELL_OVERRIDE"
+    else
+        echo "エラー: -shell オプションには bash または zsh を指定してください（指定値: $SHELL_OVERRIDE）"
+        exit 1
+    fi
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 出陣バナー表示（CC0ライセンスASCIIアート使用）
@@ -320,7 +380,7 @@ else
 EOF
 fi
 
-log_success "  └─ ダッシュボード初期化完了 (言語: $LANG_SETTING)"
+log_success "  └─ ダッシュボード初期化完了 (言語: $LANG_SETTING, シェル: $SHELL_SETTING)"
 echo ""
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -380,11 +440,13 @@ tmux split-window -v
 
 # ペインタイトル設定（0: karo, 1-8: ashigaru1-8）
 PANE_TITLES=("karo" "ashigaru1" "ashigaru2" "ashigaru3" "ashigaru4" "ashigaru5" "ashigaru6" "ashigaru7" "ashigaru8")
-PANE_COLORS=("1;31" "1;34" "1;34" "1;34" "1;34" "1;34" "1;34" "1;34" "1;34")  # karo: 赤, ashigaru: 青
+# 色設定（karo: 赤, ashigaru: 青）
+PANE_COLORS=("red" "blue" "blue" "blue" "blue" "blue" "blue" "blue" "blue")
 
 for i in {0..8}; do
     tmux select-pane -t "multiagent:0.$i" -T "${PANE_TITLES[$i]}"
-    tmux send-keys -t "multiagent:0.$i" "cd \"$(pwd)\" && export PS1='(\[\033[${PANE_COLORS[$i]}m\]${PANE_TITLES[$i]}\[\033[0m\]) \[\033[1;32m\]\w\[\033[0m\]\$ ' && clear" Enter
+    PROMPT_STR=$(generate_prompt "${PANE_TITLES[$i]}" "${PANE_COLORS[$i]}" "$SHELL_SETTING")
+    tmux send-keys -t "multiagent:0.$i" "cd \"$(pwd)\" && export PS1='${PROMPT_STR}' && clear" Enter
 done
 
 log_success "  └─ 家老・足軽の陣、構築完了"
@@ -409,7 +471,8 @@ if ! tmux new-session -d -s shogun 2>/dev/null; then
     echo ""
     exit 1
 fi
-tmux send-keys -t shogun "cd \"$(pwd)\" && export PS1='(\[\033[1;35m\]将軍\[\033[0m\]) \[\033[1;32m\]\w\[\033[0m\]\$ ' && clear" Enter
+SHOGUN_PROMPT=$(generate_prompt "将軍" "magenta" "$SHELL_SETTING")
+tmux send-keys -t shogun "cd \"$(pwd)\" && export PS1='${SHOGUN_PROMPT}' && clear" Enter
 tmux select-pane -t shogun:0.0 -P 'bg=#002b36'  # 将軍の Solarized Dark
 
 log_success "  └─ 将軍の本陣、構築完了"
