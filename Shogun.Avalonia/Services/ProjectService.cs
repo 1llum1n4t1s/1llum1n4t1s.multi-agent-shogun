@@ -32,6 +32,7 @@ public class ProjectService : IProjectService
     {
         if (!File.Exists(_filePath))
         {
+            EnsureProjectsFileExists();
             return new List<Project>();
         }
 
@@ -46,6 +47,18 @@ public class ProjectService : IProjectService
         }
     }
 
+    /// <summary>projects.yaml が無いときにディレクトリとデフォルト内容を新規作成する。</summary>
+    private void EnsureProjectsFileExists()
+    {
+        var dir = Path.GetDirectoryName(_filePath);
+        if (!string.IsNullOrEmpty(dir))
+            Directory.CreateDirectory(dir);
+        if (File.Exists(_filePath))
+            return;
+        const string defaultContent = "# Shogun projects\n# - id: \"project-id\"\n#   name: \"Project Name\"\n#   path: \"C:\\path\"\n";
+        File.WriteAllText(_filePath, defaultContent);
+    }
+
     /// <inheritdoc />
     public void SaveProjects(List<Project> projects)
     {
@@ -58,8 +71,7 @@ public class ProjectService : IProjectService
 
     private static string GetDefaultProjectsPath()
     {
-        var scriptDir = AppDomain.CurrentDomain.BaseDirectory;
-        var configDir = Path.Combine(scriptDir, "..", "..", "..", "..", "config");
+        var configDir = SettingsService.GetDefaultConfigDirectory();
         return Path.Combine(configDir, "projects.yaml");
     }
 

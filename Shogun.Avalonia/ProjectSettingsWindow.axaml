@@ -57,7 +57,10 @@
                         <!-- パス -->
                         <StackPanel Spacing="4">
                             <TextBlock Text="パス"/>
-                            <TextBox Text="{Binding SelectedProject.Path}" Watermark="/mnt/c/Projects/..."/>
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0" Text="{Binding SelectedProject.Path}" IsReadOnly="True" Watermark="参照でフォルダを選択"/>
+                                <Button Grid.Column="1" Content="参照" Margin="8,0,0,0" Click="OnBrowseProjectPath"/>
+                            </Grid>
                         </StackPanel>
 
                         <!-- 優先度 -->

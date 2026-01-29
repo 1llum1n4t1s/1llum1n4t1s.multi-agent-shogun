@@ -10,20 +10,41 @@ using Shogun.Avalonia.Models;
 namespace Shogun.Avalonia.Services;
 
 /// <summary>
-/// 将軍→家老→足軽のフローをアプリ内で完結させるオーケストレーター（WSL/tmux 不要）。
+/// 将軍→家老→足軽のフローをアプリ内で完結させるオーケストレーター。
 /// </summary>
 public class AgentOrchestrator : IAgentOrchestrator
 {
     private readonly IShogunQueueService _queueService;
     private readonly IAiService _aiService;
     private readonly IInstructionsLoader _instructionsLoader;
+    private readonly ISettingsService _settingsService;
 
     /// <summary>サービスを生成する。</summary>
-    public AgentOrchestrator(IShogunQueueService queueService, IAiService aiService, IInstructionsLoader instructionsLoader)
+    public AgentOrchestrator(IShogunQueueService queueService, IAiService aiService, IInstructionsLoader instructionsLoader, ISettingsService? settingsService = null)
     {
         _queueService = queueService;
         _aiService = aiService;
         _instructionsLoader = instructionsLoader;
+        _settingsService = settingsService ?? new SettingsService();
+    }
+
+    /// <inheritdoc />
+    public async Task<string> ResolveShogunCommandAsync(string userInput, string? projectId, CancellationToken cancellationToken = default)
+    {
+        if (!_aiService.IsAvailable)
+            return userInput;
+        var shogunInstructions = _instructionsLoader.LoadShogunInstructions() ?? "";
+        var globalContext = _instructionsLoader.LoadGlobalContext();
+        var userPrefix = string.IsNullOrWhiteSpace(globalContext) ? "" : $"以下はシステム全体の設定・殿の好み（memory/global_context.md）である。参照してから判断せよ。\n\n---\n{globalContext}\n---\n\n";
+        var userMessage = userPrefix + $"殿の指示: {userInput}\nプロジェクト: {(string.IsNullOrEmpty(projectId) ? "未指定" : projectId)}";
+        var settings = _settingsService.Get();
+        var modelShogun = !string.IsNullOrWhiteSpace(settings.ModelShogun) ? settings.ModelShogun : null;
+        var response = await _aiService.SendWithSystemAsync(shogunInstructions, userMessage, modelShogun, cancellationToken);
+        var trimmed = response.Trim();
+        var codeBlock = Regex.Match(trimmed, @"```(?:[\w]*)\s*([\s\S]*?)```");
+        if (codeBlock.Success)
+            trimmed = codeBlock.Groups[1].Value.Trim();
+        return string.IsNullOrWhiteSpace(trimmed) ? userInput : trimmed;
     }
 
     /// <inheritdoc />
@@ -34,7 +55,7 @@ public class AgentOrchestrator : IAgentOrchestrator
         if (cmd == null)
             return $"エラー: コマンド {commandId} が見つかりません。";
         if (!_aiService.IsAvailable)
-            return "エラー: APIキーまたはモデル名が設定されていません。";
+            return "エラー: 当アプリでは API 呼び出しは行いません。家老・足軽の実行は upstream の Claude Code CLI 等で行ってください。";
 
         try
         {
@@ -45,6 +66,7 @@ public class AgentOrchestrator : IAgentOrchestrator
             var globalContext = _instructionsLoader.LoadGlobalContext();
             var karoInstructions = _instructionsLoader.LoadKaroInstructions() ?? "";
             var karoUserPrefix = string.IsNullOrWhiteSpace(globalContext) ? "" : $"以下はシステム全体の設定・殿の好み（memory/global_context.md）である。参照してから判断せよ。\n\n---\n{globalContext}\n---\n\n";
+            var ashigaruCount = _queueService.GetAshigaruCount();
             var karoUser = karoUserPrefix + $@"将軍から以下の指示が届いた。分解して足軽に割り当てよ。
 
 Command ID: {cmd.Id}
@@ -54,10 +76,12 @@ Priority: {cmd.Priority ?? "medium"}
 
 {projectsYaml}
 
-上記を踏まえ、1～8の足軽に任務を振り分けよ。必要な人数だけ使え（1人で足りれば1人でよい）。
+上記を踏まえ、1～{ashigaruCount}の足軽に任務を振り分けよ。必要な人数だけ使え（1人で足りれば1人でよい）。
 出力は必ず以下のJSON形式のみ。他に説明やマークダウンは書くな。
 {{\""assignments\"": [{{\""ashigaru\"": 1, \""task_id\"": \""{cmd.Id}_1\"", \""parent_cmd\"": \""{cmd.Id}\"", \""description\"": \""...\"", \""target_path\"": \""...\""}}, ...]}}";
-            var karoResponse = await _aiService.SendWithSystemAsync(karoInstructions, karoUser, cancellationToken);
+            var settings = _settingsService.Get();
+            var modelKaro = !string.IsNullOrWhiteSpace(settings.ModelKaro) ? settings.ModelKaro : null;
+            var karoResponse = await _aiService.SendWithSystemAsync(karoInstructions, karoUser, modelKaro, cancellationToken);
             var assignments = ParseTaskAssignments(karoResponse);
             if (assignments == null || assignments.Count == 0)
             {
@@ -67,14 +91,15 @@ Priority: {cmd.Priority ?? "medium"}
             var timestamp = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
             foreach (var a in assignments)
             {
-                if (a.Ashigaru < 1 || a.Ashigaru > 8)
+                if (a.Ashigaru < 1 || a.Ashigaru > ashigaruCount)
                     continue;
                 _queueService.WriteTaskYaml(a.Ashigaru, a.TaskId ?? $"{cmd.Id}_{a.Ashigaru}", a.ParentCmd ?? cmd.Id, a.Description ?? "", a.TargetPath, "in_progress", timestamp);
             }
             UpdateDashboardInProgress(dashboardBefore, cmd.Id, assignments);
             var ashigaruInstructions = _instructionsLoader.LoadAshigaruInstructions() ?? "";
             var ashigaruGlobalPrefix = string.IsNullOrWhiteSpace(globalContext) ? "" : $"以下はシステム全体の設定・殿の好み（memory/global_context.md）である。参照してから作業せよ。\n\n---\n{globalContext}\n---\n\n";
-            var reportTasks = assignments.Where(a => a.Ashigaru >= 1 && a.Ashigaru <= 8).Select(async a =>
+            var modelAshigaru = !string.IsNullOrWhiteSpace(settings.ModelAshigaru) ? settings.ModelAshigaru : null;
+            var reportTasks = assignments.Where(a => a.Ashigaru >= 1 && a.Ashigaru <= ashigaruCount).Select(async a =>
             {
                 var taskContent = _queueService.ReadTaskYaml(a.Ashigaru);
                 var ashigaruUser = ashigaruGlobalPrefix + $@"以下の任務を実行し、結果を報告せよ。スキル化候補の有無は毎回必ず記入せよ。
@@ -84,7 +109,7 @@ Priority: {cmd.Priority ?? "medium"}
 出力は必ず以下のJSON形式のみ。他に説明やマークダウンは書くな。
 {{\""task_id\"": \""{a.TaskId}\"", \""status\"": \""done\"", \""result\"": \""（実行結果の要約）\"", \""skill_candidate_found\"": false, \""skill_candidate_name\"": null, \""skill_candidate_description\"": null, \""skill_candidate_reason\"": null}}
 ※ skill_candidate_found が true のときは name, description, reason を記入せよ。";
-                var response = await _aiService.SendWithSystemAsync(ashigaruInstructions, ashigaruUser, cancellationToken);
+                var response = await _aiService.SendWithSystemAsync(ashigaruInstructions, ashigaruUser, modelAshigaru, cancellationToken);
                 var report = ParseAshigaruReport(response);
                 var ts = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
                 _queueService.WriteReportYaml(a.Ashigaru, a.TaskId ?? "", ts, report?.Status ?? "done", report?.Result ?? response, report?.SkillCandidateFound ?? false, report?.SkillCandidateName, report?.SkillCandidateDescription, report?.SkillCandidateReason);

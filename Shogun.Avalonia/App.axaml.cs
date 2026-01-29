@@ -19,13 +19,15 @@ public partial class App : Application
         {
             var settingsService = new SettingsService();
             var projectService = new ProjectService();
-            var aiService = new AiService(settingsService);
+            var aiService = new AiService();
             var queueService = new ShogunQueueService(settingsService);
             var instructionsLoader = new InstructionsLoader(queueService);
-            var orchestrator = new AgentOrchestrator(queueService, aiService, instructionsLoader);
+            var orchestrator = new AgentOrchestrator(queueService, aiService, instructionsLoader, settingsService);
+            var claudeCodeSetupService = new ClaudeCodeSetupService();
+            var claudeModelsService = new ClaudeCodeModelsService();
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(projectService, aiService, queueService, orchestrator, settingsService)
+                DataContext = new MainWindowViewModel(projectService, aiService, queueService, orchestrator, settingsService, claudeCodeSetupService, null, claudeModelsService)
             };
         }
 

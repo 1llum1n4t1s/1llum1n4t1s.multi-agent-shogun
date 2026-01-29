@@ -16,6 +16,13 @@ public class InstructionsLoader : IInstructionsLoader
     }
 
     /// <inheritdoc />
+    public string? LoadShogunInstructions()
+    {
+        var path = Path.Combine(_queueService.GetRepoRoot(), "instructions", "shogun.md");
+        return File.Exists(path) ? File.ReadAllText(path) : GetShogunFallback();
+    }
+
+    /// <inheritdoc />
     public string? LoadKaroInstructions()
     {
         var path = Path.Combine(_queueService.GetRepoRoot(), "instructions", "karo.md");
@@ -34,6 +41,13 @@ public class InstructionsLoader : IInstructionsLoader
     {
         var path = Path.Combine(_queueService.GetRepoRoot(), "memory", "global_context.md");
         return File.Exists(path) ? File.ReadAllText(path) : null;
+    }
+
+    private static string GetShogunFallback()
+    {
+        return @"汝は将軍なり。上様（殿）の指示を受け、家老に出す指示文を1つ作成せよ。
+自ら手を動かすことなく、家老に渡す指示のみを出力せよ。
+出力は家老への指示として queue に載せる1件のテキストのみ。余計な説明やマークダウン・コードブロックは書くな。";
     }
 
     private static string GetKaroFallback()

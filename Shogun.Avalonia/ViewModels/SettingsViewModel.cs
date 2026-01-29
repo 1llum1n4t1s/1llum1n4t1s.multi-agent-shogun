@@ -1,36 +1,54 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading.Tasks;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Shogun.Avalonia.Models;
 using Shogun.Avalonia.Services;
+using Shogun.Avalonia.Util;
 
 namespace Shogun.Avalonia.ViewModels;
 
 /// <summary>
 /// 設定画面の ViewModel。
-/// 言語・足軽人数は本家スクリプトが config/settings.yaml を読むため当アプリでは変更不可（FORK_POLICY）。
+/// モデル一覧は models.dev API から取得する。API キーは扱わない。
 /// </summary>
 public partial class SettingsViewModel : ObservableObject
 {
     private readonly ISettingsService _settingsService;
+    private readonly IClaudeModelsService _claudeModelsService;
     private readonly Action? _onClose;
 
     /// <summary>ログレベルの選択肢（logging.level）。XAML バインディング用。</summary>
     public IReadOnlyList<string> LogLevelOptions { get; } = new[] { "debug", "info", "warn", "error" };
 
-    /// <summary>モデル名の選択肢（Claude。その他は ComboBox で直接入力）。XAML バインディング用。</summary>
-    public IReadOnlyList<string> ModelNameOptions { get; } = new[]
-    {
-        "claude-sonnet-4-20250514",
-        "claude-3-5-sonnet-20241022",
-        "claude-3-5-haiku-20241022",
-        "claude-3-opus-20240229",
-        "claude-3-haiku-20240307"
-    };
+    /// <summary>足軽人数の選択肢（1～20）。XAML バインディング用。</summary>
+    public IReadOnlyList<int> AshigaruCountOptions { get; } = Enumerable.Range(1, 20).ToList();
+
+    /// <summary>モデル選択肢の全件（models.dev から取得。取得前は空）。</summary>
+    public ObservableCollection<ModelOption> AllModelOptions { get; } = new();
+
+    /// <summary>モデル一覧の読み込み中か。</summary>
+    [ObservableProperty]
+    private bool _isLoadingModels = false;
+
+    /// <summary>将軍用モデルの選択肢（ドロップダウンで選択した MODEL）。</summary>
+    [ObservableProperty]
+    private ModelOption? _selectedModelShogun;
+
+    /// <summary>家老用モデルの選択肢。</summary>
+    [ObservableProperty]
+    private ModelOption? _selectedModelKaro;
+
+    /// <summary>足軽用モデルの選択肢。</summary>
+    [ObservableProperty]
+    private ModelOption? _selectedModelAshigaru;
 
     [ObservableProperty]
-    private string _skillSavePath = string.Empty;
+    private int _ashigaruCount = 8;
 
     [ObservableProperty]
     private string _skillLocalPath = string.Empty;
@@ -45,59 +63,155 @@ public partial class SettingsViewModel : ObservableObject
     private string _logPath = string.Empty;
 
     [ObservableProperty]
-    private string _apiKey = string.Empty;
+    private string _modelShogun = string.Empty;
 
     [ObservableProperty]
-    private string _modelName = "claude-sonnet-4-20250514";
+    private string _modelKaro = string.Empty;
 
     [ObservableProperty]
-    private string _apiEndpoint = string.Empty;
+    private string _modelAshigaru = string.Empty;
 
+    /// <summary>将軍用モデルで Thinking を使うか。</summary>
     [ObservableProperty]
-    private string _repoRoot = string.Empty;
+    private bool _thinkingShogun;
+
+    /// <summary>家老用モデルで Thinking を使うか。</summary>
+    [ObservableProperty]
+    private bool _thinkingKaro;
+
+    /// <summary>足軽用モデルで Thinking を使うか。</summary>
+    [ObservableProperty]
+    private bool _thinkingAshigaru;
 
     /// <summary>ViewModel を生成する。</summary>
     /// <param name="settingsService">設定サービス。</param>
+    /// <param name="claudeModelsService">models.dev でモデル一覧を取得するサービス。null のときは新規作成。</param>
     /// <param name="onClose">ウィンドウを閉じる際のコールバック。</param>
-    public SettingsViewModel(ISettingsService settingsService, Action? onClose = null)
+    public SettingsViewModel(ISettingsService settingsService, IClaudeModelsService? claudeModelsService = null, Action? onClose = null)
     {
         _settingsService = settingsService;
+        _claudeModelsService = claudeModelsService ?? new ClaudeCodeModelsService();
         _onClose = onClose;
         LoadFromService();
     }
 
-    /// <summary>設定サービスから現在の設定を読み込む。</summary>
+    /// <summary>設定サービスから現在の設定を読み込む。パスは環境変数を展開して表示する。モデルは保存値のまま（空のときは空）。</summary>
     private void LoadFromService()
     {
         var s = _settingsService.Get();
-        SkillSavePath = s.SkillSavePath;
-        SkillLocalPath = s.SkillLocalPath;
-        ScreenshotPath = s.ScreenshotPath;
+        AshigaruCount = s.AshigaruCount;
+        SkillLocalPath = ExpandPath(s.SkillLocalPath);
+        ScreenshotPath = ExpandPath(s.ScreenshotPath);
         LogLevel = s.LogLevel;
-        LogPath = s.LogPath;
-        ApiKey = s.ApiKey;
-        ModelName = s.ModelName;
-        ApiEndpoint = s.ApiEndpoint;
-        RepoRoot = s.RepoRoot;
+        LogPath = ExpandPath(s.LogPath);
+        ModelShogun = NormalizeModelId(s.ModelShogun);
+        ModelKaro = NormalizeModelId(s.ModelKaro);
+        ModelAshigaru = NormalizeModelId(s.ModelAshigaru);
+        ThinkingShogun = s.ThinkingShogun;
+        ThinkingKaro = s.ThinkingKaro;
+        ThinkingAshigaru = s.ThinkingAshigaru;
+    }
+
+    /// <summary>保存済み ID（ModelShogun/Karo/Ashigaru）から SelectedModel* を同期する。AllModelOptions 設定後に呼ぶ。</summary>
+    private void SyncSelectedFromIds()
+    {
+        SyncOne(ModelShogun, o => SelectedModelShogun = o);
+        SyncOne(ModelKaro, o => SelectedModelKaro = o);
+        SyncOne(ModelAshigaru, o => SelectedModelAshigaru = o);
+    }
+
+    /// <summary>ID に対応する ModelOption を AllModelOptions から探し setSelected で設定する。</summary>
+    private void SyncOne(string id, Action<ModelOption?> setSelected)
+    {
+        if (ClaudeCodeModelsService.IsInvalidModelId(id))
+        {
+            setSelected(null);
+            return;
+        }
+        var opt = string.IsNullOrEmpty(id) ? null : AllModelOptions.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+        setSelected(opt);
+    }
+
+    /// <summary>「claude-code」は無効なため空として扱う。</summary>
+    private static string NormalizeModelId(string? id) =>
+        ClaudeCodeModelsService.IsInvalidModelId(id) ? string.Empty : (id ?? string.Empty);
+
+    /// <summary>ModelShogun/Karo/Ashigaru が空のとき、将軍・家老＝Sonnet 最大、足軽＝Haiku 最大で補う。設定画面表示時の未選択解消用。</summary>
+    private void ApplyDefaultModelsIfEmpty()
+    {
+        if (AllModelOptions.Count == 0) return;
+        var ids = AllModelOptions.Select(x => x.Id).Where(id => !ClaudeCodeModelsService.IsInvalidModelId(id)).ToList();
+        if (ids.Count == 0) return;
+        if (string.IsNullOrWhiteSpace(ModelShogun))
+            ModelShogun = ModelFamilyHelper.GetLatestIdInFamilyBySort(ids, "sonnet") ?? ids.FirstOrDefault() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(ModelKaro))
+            ModelKaro = ModelFamilyHelper.GetLatestIdInFamilyBySort(ids, "sonnet") ?? ids.FirstOrDefault() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(ModelAshigaru))
+            ModelAshigaru = ModelFamilyHelper.GetLatestIdInFamilyBySort(ids, "haiku") ?? ids.FirstOrDefault() ?? string.Empty;
+    }
+
+    /// <summary>AllModelOptions を MODEL（DisplayName）昇順でソートする。</summary>
+    private void SortAllModelOptionsByDisplayName()
+    {
+        var sorted = AllModelOptions.OrderBy(x => x.DisplayName, StringComparer.Ordinal).ToList();
+        AllModelOptions.Clear();
+        foreach (var o in sorted)
+            AllModelOptions.Add(o);
+    }
+
+    partial void OnSelectedModelShogunChanged(ModelOption? value) => ModelShogun = value?.Id ?? string.Empty;
+    partial void OnSelectedModelKaroChanged(ModelOption? value) => ModelKaro = value?.Id ?? string.Empty;
+    partial void OnSelectedModelAshigaruChanged(ModelOption? value) => ModelAshigaru = value?.Id ?? string.Empty;
+
+    private static string ExpandPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return path;
+        return Environment.ExpandEnvironmentVariables(path);
     }
 
     /// <summary>保存してウィンドウを閉じる。</summary>
     [RelayCommand]
     private void SaveAndClose()
     {
+        var current = _settingsService.Get();
+        var count = AshigaruCount;
+        if (count < 1) count = 8;
+        if (count > 20) count = 20;
+        var modelShogun = ResolveModelFromList(ModelShogun);
+        var modelKaro = ResolveModelFromList(ModelKaro);
+        var modelAshigaru = ResolveModelFromList(ModelAshigaru);
         _settingsService.Save(new AppSettings
         {
-            SkillSavePath = SkillSavePath,
+            AshigaruCount = count,
+            SkillSavePath = current.SkillSavePath,
             SkillLocalPath = SkillLocalPath,
             ScreenshotPath = ScreenshotPath,
             LogLevel = LogLevel,
             LogPath = LogPath,
-            ApiKey = ApiKey,
-            ModelName = ModelName,
-            ApiEndpoint = ApiEndpoint,
-            RepoRoot = RepoRoot
+            ModelName = current.ModelName,
+            ModelShogun = modelShogun,
+            ModelKaro = modelKaro,
+            ModelAshigaru = modelAshigaru,
+            ThinkingShogun = ThinkingShogun,
+            ThinkingKaro = ThinkingKaro,
+            ThinkingAshigaru = ThinkingAshigaru,
+            ApiEndpoint = current.ApiEndpoint,
+            RepoRoot = current.RepoRoot
         });
         _onClose?.Invoke();
+    }
+
+    /// <summary>モデルが空のとき、一覧の先頭（haiku があれば haiku）で解決する。「claude-code」は無効のため空を返す。</summary>
+    private string ResolveModelFromList(string model)
+    {
+        if (ClaudeCodeModelsService.IsInvalidModelId(model))
+            return string.Empty;
+        if (!string.IsNullOrWhiteSpace(model))
+            return model;
+        if (AllModelOptions.Count == 0)
+            return string.Empty;
+        return FirstHaikuOrFirst(AllModelOptions)?.Id ?? string.Empty;
     }
 
     /// <summary>保存せずにウィンドウを閉じる。</summary>
@@ -105,5 +219,101 @@ public partial class SettingsViewModel : ObservableObject
     private void Cancel()
     {
         _onClose?.Invoke();
+    }
+
+    /// <summary>渡されたモデル一覧（ID と表示名）で AllModelOptions を初期表示する。設定画面を開くときに起動時取得分を渡す。未選択のときは将軍・家老＝Sonnet 最大、足軽＝Haiku 最大で補う。</summary>
+    /// <param name="models">表示するモデル一覧。null または空のときは何もしない。</param>
+    public void SetInitialModels(IReadOnlyList<(string Id, string Name)>? models)
+    {
+        if (models == null || models.Count == 0) return;
+        AllModelOptions.Clear();
+        foreach (var m in models)
+            AllModelOptions.Add(new ModelOption(m.Id, m.Name));
+        SortAllModelOptionsByDisplayName();
+        ApplyDefaultModelsIfEmpty();
+        SyncSelectedFromIds();
+    }
+
+    /// <summary>models.dev API でモデル一覧を取得し AllModelOptions を更新する。コレクション更新は UI スレッドで行う。</summary>
+    public async Task LoadModelOptionsAsync()
+    {
+        if (IsLoadingModels)
+            return;
+        IsLoadingModels = true;
+        try
+        {
+            var models = await _claudeModelsService.GetModelsAsync().ConfigureAwait(false);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                AllModelOptions.Clear();
+                if (models.Count > 0)
+                {
+                    foreach (var m in models)
+                        AllModelOptions.Add(new ModelOption(m.Id, m.Name));
+                    SortAllModelOptionsByDisplayName();
+                    ApplyDefaultModelsIfEmpty();
+                }
+                SyncSelectedFromIds();
+            });
+        }
+        finally
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => IsLoadingModels = false);
+        }
+    }
+
+    /// <summary>一覧取得後に未設定のモデルを、一覧の先頭（haiku があれば haiku）で埋める。</summary>
+    public void ResolveEmptyModelsFromList()
+    {
+        if (AllModelOptions.Count == 0)
+            return;
+        var first = FirstHaikuOrFirst(AllModelOptions);
+        if (first == null) return;
+        if (string.IsNullOrWhiteSpace(ModelShogun)) { ModelShogun = first.Id; SelectedModelShogun = first; }
+        if (string.IsNullOrWhiteSpace(ModelKaro)) { ModelKaro = first.Id; SelectedModelKaro = first; }
+        if (string.IsNullOrWhiteSpace(ModelAshigaru)) { ModelAshigaru = first.Id; SelectedModelAshigaru = first; }
+    }
+
+    /// <summary>保存済みモデルを同一ファミリ（Haiku/Sonnet/Opus）の最新に更新する。一覧は models.dev から取得した値のみ使用。</summary>
+    public void UpgradeModelsToLatestInFamily()
+    {
+        if (AllModelOptions.Count == 0)
+            return;
+        var list = AllModelOptions.Select(x => x.Id).ToList();
+        ModelShogun = ModelFamilyHelper.UpgradeToLatestInFamily(ModelShogun, list);
+        ModelKaro = ModelFamilyHelper.UpgradeToLatestInFamily(ModelKaro, list);
+        ModelAshigaru = ModelFamilyHelper.UpgradeToLatestInFamily(ModelAshigaru, list);
+        SyncSelectedFromIds();
+    }
+
+    /// <summary>同一ファミリ最新へ更新したモデル設定を永続化する（設定画面を開いたときに自動保存）。</summary>
+    public void PersistUpgradedModels()
+    {
+        var current = _settingsService.Get();
+        _settingsService.Save(new AppSettings
+        {
+            AshigaruCount = current.AshigaruCount,
+            SkillSavePath = current.SkillSavePath,
+            SkillLocalPath = current.SkillLocalPath,
+            ScreenshotPath = current.ScreenshotPath,
+            LogLevel = current.LogLevel,
+            LogPath = current.LogPath,
+            ModelName = current.ModelName,
+            ModelShogun = ModelShogun,
+            ModelKaro = ModelKaro,
+            ModelAshigaru = ModelAshigaru,
+            ThinkingShogun = ThinkingShogun,
+            ThinkingKaro = ThinkingKaro,
+            ThinkingAshigaru = ThinkingAshigaru,
+            ApiEndpoint = current.ApiEndpoint,
+            RepoRoot = current.RepoRoot
+        });
+    }
+
+    private static ModelOption? FirstHaikuOrFirst(IEnumerable<ModelOption> options)
+    {
+        var valid = options.Where(o => !ClaudeCodeModelsService.IsInvalidModelId(o.Id));
+        var haiku = valid.FirstOrDefault(o => o.Id.Contains("haiku", StringComparison.OrdinalIgnoreCase));
+        return haiku ?? valid.FirstOrDefault();
     }
 }

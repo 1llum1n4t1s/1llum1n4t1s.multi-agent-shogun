@@ -8,12 +8,21 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <PlatformTarget>x64</PlatformTarget>
+    <Version>1.0.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
     <TrimmerRootDescriptor Include="Roots.xml" />
   </ItemGroup>
+
+  <Target Name="CleanBinObjBeforeRestore" BeforeTargets="Restore">
+    <RemoveDir Directories="$(MSBuildProjectDirectory)\bin;$(MSBuildProjectDirectory)\obj" />
+  </Target>
+
+  <Target Name="EnsureIntermediateOutputPath" BeforeTargets="PrepareForBuild">
+    <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.11" />
@@ -22,7 +31,13 @@
     <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="25.2.2" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.3.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-    <PackageReference Include="Anthropic.SDK" Version="5.9.0" />
+    <PackageReference Include="Velopack" Version="0.0.1298" />
+    <PackageReference Include="log4net" Version="3.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="log4net.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

@@ -8,7 +8,7 @@ using Shogun.Avalonia.Models;
 namespace Shogun.Avalonia.Services;
 
 /// <summary>
-/// フォーク元の queue / dashboard を読み書きするサービス。WSL/tmux は使用しない。
+/// フォーク元の queue / dashboard を読み書きするサービス。
 /// </summary>
 public class ShogunQueueService : IShogunQueueService
 {
@@ -18,6 +18,15 @@ public class ShogunQueueService : IShogunQueueService
     public ShogunQueueService(ISettingsService settingsService)
     {
         _settingsService = settingsService;
+    }
+
+    /// <inheritdoc />
+    public int GetAshigaruCount()
+    {
+        var n = _settingsService.Get().AshigaruCount;
+        if (n < 1) return 8;
+        if (n > 20) return 20;
+        return n;
     }
 
     /// <inheritdoc />
@@ -89,7 +98,8 @@ public class ShogunQueueService : IShogunQueueService
     /// <inheritdoc />
     public string ReadTaskYaml(int ashigaruIndex)
     {
-        if (ashigaruIndex < 1 || ashigaruIndex > 8)
+        var max = GetAshigaruCount();
+        if (ashigaruIndex < 1 || ashigaruIndex > max)
             return string.Empty;
         var path = Path.Combine(GetRepoRoot(), "queue", "tasks", $"ashigaru{ashigaruIndex}.yaml");
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
@@ -98,7 +108,8 @@ public class ShogunQueueService : IShogunQueueService
     /// <inheritdoc />
     public string ReadReportYaml(int ashigaruIndex)
     {
-        if (ashigaruIndex < 1 || ashigaruIndex > 8)
+        var max = GetAshigaruCount();
+        if (ashigaruIndex < 1 || ashigaruIndex > max)
             return string.Empty;
         var path = Path.Combine(GetRepoRoot(), "queue", "reports", $"ashigaru{ashigaruIndex}_report.yaml");
         return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
@@ -107,7 +118,8 @@ public class ShogunQueueService : IShogunQueueService
     /// <inheritdoc />
     public void WriteTaskYaml(int ashigaruIndex, string taskId, string parentCmd, string description, string? targetPath, string status, string timestamp)
     {
-        if (ashigaruIndex < 1 || ashigaruIndex > 8)
+        var max = GetAshigaruCount();
+        if (ashigaruIndex < 1 || ashigaruIndex > max)
             return;
         var dir = Path.Combine(GetRepoRoot(), "queue", "tasks");
         Directory.CreateDirectory(dir);
@@ -128,7 +140,8 @@ public class ShogunQueueService : IShogunQueueService
     /// <inheritdoc />
     public void WriteReportYaml(int ashigaruIndex, string taskId, string timestamp, string status, string result, bool skillCandidateFound = false, string? skillCandidateName = null, string? skillCandidateDescription = null, string? skillCandidateReason = null)
     {
-        if (ashigaruIndex < 1 || ashigaruIndex > 8)
+        var max = GetAshigaruCount();
+        if (ashigaruIndex < 1 || ashigaruIndex > max)
             return;
         var dir = Path.Combine(GetRepoRoot(), "queue", "reports");
         Directory.CreateDirectory(dir);
@@ -281,7 +294,8 @@ public class ShogunQueueService : IShogunQueueService
         sb.AppendLine("    status: " + karoStatus);
         sb.AppendLine("    current_subtasks: " + subtaskCount);
         sb.AppendLine("    last_action: null");
-        for (var i = 1; i <= 8; i++)
+        var maxAshigaru = GetAshigaruCount();
+        for (var i = 1; i <= maxAshigaru; i++)
         {
             var a = assignments?.FirstOrDefault(x => x.Ashigaru == i);
             var ashigaruStatus = a == null ? "idle" : (taskStatus == "done" || taskStatus == "failed" ? "done" : "in_progress");

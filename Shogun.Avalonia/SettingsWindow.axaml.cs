@@ -14,11 +14,18 @@ public partial class SettingsWindow : Window
     public SettingsWindow()
     {
         InitializeComponent();
+        Loaded += OnLoaded;
     }
 
-    private async void OnBrowseSkillSavePath(object? sender, RoutedEventArgs e)
+    private async void OnLoaded(object? sender, RoutedEventArgs e)
     {
-        await PickFolderAndSet(p => (DataContext as ViewModels.SettingsViewModel)!.SkillSavePath = p, "スキル保存先を選択");
+        if (DataContext is ViewModels.SettingsViewModel vm)
+        {
+            await vm.LoadModelOptionsAsync().ConfigureAwait(true);
+            vm.ResolveEmptyModelsFromList();
+            vm.UpgradeModelsToLatestInFamily();
+            vm.PersistUpgradedModels();
+        }
     }
 
     private async void OnBrowseSkillLocalPath(object? sender, RoutedEventArgs e)

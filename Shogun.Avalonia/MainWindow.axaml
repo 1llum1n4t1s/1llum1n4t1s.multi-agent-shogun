@@ -58,7 +58,8 @@
             </Border>
         </DataTemplate>
     </Window.Resources>
-    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
+    <Grid>
+        <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
         <Border Grid.Row="0" Padding="8,4">
             <Grid ColumnDefinitions="*,Auto">
                 <TextBlock Grid.Column="0"
@@ -158,5 +159,29 @@
                 </Grid>
             </Border>
         </Grid>
+        </Grid>
+
+        <!-- 起動準備オーバーレイ（UI テーマに合わせた背景・文字色） -->
+        <Border IsVisible="{Binding IsLoading}"
+                Background="{actipro:ThemeResource Container1BackgroundBrush}"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Opacity="0.95">
+            <Grid Margin="48,0" HorizontalAlignment="Stretch" VerticalAlignment="Center">
+                <StackPanel HorizontalAlignment="Stretch" VerticalAlignment="Center" Spacing="12">
+                    <TextBlock Text="{Binding LoadingMessage}"
+                               FontSize="16"
+                               HorizontalAlignment="Stretch"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"/>
+                    <TextBlock Text="しばらくお待ちください..."
+                               FontSize="12"
+                               HorizontalAlignment="Stretch"
+                               TextWrapping="Wrap"
+                               TextAlignment="Center"
+                               Opacity="0.8"/>
+                </StackPanel>
+            </Grid>
+        </Border>
     </Grid>
 </Window>

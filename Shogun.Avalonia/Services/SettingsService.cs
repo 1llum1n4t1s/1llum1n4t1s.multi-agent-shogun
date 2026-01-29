@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Shogun.Avalonia.Models;
@@ -38,16 +40,30 @@ public class SettingsService : ISettingsService
 
         EnsureYamlDefaults();
         var yaml = ReadYamlPaths();
+        var yamlAgents = ReadYamlAgentsModel();
         var api = ReadJsonApi();
+        var ashigaruCount = yaml.AshigaruCount > 0 ? yaml.AshigaruCount : api.ashigaruCount;
+        if (ashigaruCount < 1) ashigaruCount = 8;
+        if (ashigaruCount > 20) ashigaruCount = 20;
+        var modelName = string.IsNullOrWhiteSpace(api.modelName) ? string.Empty : api.modelName;
+        var modelShogun = !string.IsNullOrWhiteSpace(api.modelShogun) ? api.modelShogun : (yamlAgents.modelShogun ?? string.Empty);
+        var modelKaro = !string.IsNullOrWhiteSpace(api.modelKaro) ? api.modelKaro : (yamlAgents.modelKaro ?? string.Empty);
+        var modelAshigaru = !string.IsNullOrWhiteSpace(api.modelAshigaru) ? api.modelAshigaru : (yamlAgents.modelAshigaru ?? string.Empty);
         _current = new AppSettings
         {
+            AshigaruCount = ashigaruCount,
             SkillSavePath = yaml.SkillSavePath,
             SkillLocalPath = yaml.SkillLocalPath,
             ScreenshotPath = yaml.ScreenshotPath,
             LogLevel = yaml.LogLevel,
             LogPath = yaml.LogPath,
-            ApiKey = api.apiKey,
-            ModelName = api.modelName,
+            ModelName = modelName,
+            ModelShogun = modelShogun,
+            ModelKaro = modelKaro,
+            ModelAshigaru = modelAshigaru,
+            ThinkingShogun = api.thinkingShogun,
+            ThinkingKaro = api.thinkingKaro,
+            ThinkingAshigaru = api.thinkingAshigaru,
             ApiEndpoint = api.apiEndpoint,
             RepoRoot = api.repoRoot
         };
@@ -58,16 +74,19 @@ public class SettingsService : ISettingsService
     public void Save(AppSettings settings)
     {
         _current = settings;
-        WriteYamlPaths(settings.SkillSavePath, settings.SkillLocalPath, settings.ScreenshotPath, settings.LogLevel, settings.LogPath);
-        WriteJsonApi(settings.ApiKey, settings.ModelName, settings.ApiEndpoint, settings.RepoRoot);
+        WriteYamlPaths(settings.SkillSavePath, settings.SkillLocalPath, settings.ScreenshotPath, settings.LogLevel, settings.LogPath, settings.AshigaruCount, settings.ModelShogun, settings.ModelKaro, settings.ModelAshigaru);
+        WriteJsonApi(settings.ModelName, settings.ModelShogun, settings.ModelKaro, settings.ModelAshigaru, settings.AshigaruCount, settings.ApiEndpoint, settings.RepoRoot, settings.ThinkingShogun, settings.ThinkingKaro, settings.ThinkingAshigaru);
     }
 
-    /// <summary>config ディレクトリの既定パス（プロジェクトルートの config）。</summary>
+    /// <summary>config ディレクトリの既定パス。Windows: %USERPROFILE%\\Documents\\Shogun\\config、mac: ~/Documents/Shogun/config。ビルド・アップデートで消えないようユーザー Documents に作成。</summary>
     public static string GetDefaultConfigDirectory()
     {
-        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-        var configDir = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "config"));
-        return configDir;
+        var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (string.IsNullOrEmpty(userProfile) && IsWindows)
+            userProfile = Environment.ExpandEnvironmentVariables("%USERPROFILE%");
+        if (string.IsNullOrEmpty(userProfile))
+            userProfile = "~";
+        return Path.Combine(userProfile, "Documents", "Shogun", "config");
     }
 
     private static string GetDefaultSettingsYamlPath()
@@ -157,13 +176,17 @@ public class SettingsService : ISettingsService
         var newSkillLocal = string.IsNullOrWhiteSpace(yaml.SkillLocalPath) ? defaults.SkillLocalPath : yaml.SkillLocalPath;
         var newScreenshot = string.IsNullOrWhiteSpace(yaml.ScreenshotPath) ? defaults.ScreenshotPath : yaml.ScreenshotPath;
         var newLogPath = string.IsNullOrWhiteSpace(yaml.LogPath) ? defaults.LogPath : yaml.LogPath;
-        WriteYamlPaths(newSkillSave, newSkillLocal, newScreenshot, yaml.LogLevel, newLogPath);
+        var (mShogun, mKaro, mAshigaru) = ReadYamlAgentsModel();
+        WriteYamlPaths(newSkillSave, newSkillLocal, newScreenshot, yaml.LogLevel, newLogPath, yaml.AshigaruCount, mShogun ?? string.Empty, mKaro ?? string.Empty, mAshigaru ?? string.Empty);
     }
 
-    private void WriteFullDefaultYaml(string skillSave, string skillLocal, string screenshot, string logPath)
+    private void WriteFullDefaultYaml(string skillSave, string skillLocal, string screenshot, string logPath, string modelShogun = "", string modelKaro = "", string modelAshigaru = "")
     {
-        var quote = (string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+        var quote = (string s) => "\"" + (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
         var content = $@"# multi-agent-shogun 設定ファイル
+
+# 足軽の人数（1～20）
+ashigaru_count: 8
 
 # 言語設定
 language: ja
@@ -182,20 +205,28 @@ screenshot:
 logging:
   level: info
   path: {quote(logPath)}
+
+# エージェント用モデル（将軍・家老・足軽）
+agents:
+  model:
+    shogun: {quote(modelShogun)}
+    karo: {quote(modelKaro)}
+    ashigaru: {quote(modelAshigaru)}
 ";
         File.WriteAllText(_yamlPath, content);
     }
 
-    private (string SkillSavePath, string SkillLocalPath, string ScreenshotPath, string LogLevel, string LogPath) ReadYamlPaths()
+    private (string SkillSavePath, string SkillLocalPath, string ScreenshotPath, string LogLevel, string LogPath, int AshigaruCount) ReadYamlPaths()
     {
         var skillSave = string.Empty;
         var skillLocal = string.Empty;
         var screenshotPath = string.Empty;
         var logLevel = "info";
         var logPath = string.Empty;
+        var ashigaruCount = 0;
 
         if (!File.Exists(_yamlPath))
-            return (skillSave, skillLocal, screenshotPath, logLevel, logPath);
+            return (skillSave, skillLocal, screenshotPath, logLevel, logPath, ashigaruCount);
 
         var lines = File.ReadAllLines(_yamlPath);
         var inSkill = false;
@@ -211,6 +242,14 @@ logging:
                 continue;
             }
 
+            if (trimmed.StartsWith("ashigaru_count:"))
+            {
+                var v = ExtractYamlValue(trimmed.Substring("ashigaru_count:".Length));
+                if (int.TryParse(v, out var n) && n >= 1 && n <= 20)
+                    ashigaruCount = n;
+                inSkill = inScreenshot = inLogging = false;
+                continue;
+            }
             if (trimmed.StartsWith("skill:"))
             {
                 inSkill = true;
@@ -265,7 +304,66 @@ logging:
                 inSkill = inScreenshot = inLogging = false;
         }
 
-        return (skillSave, skillLocal, screenshotPath, logLevel, logPath);
+        return (skillSave, skillLocal, screenshotPath, logLevel, logPath, ashigaruCount);
+    }
+
+    /// <summary>config/settings.yaml の agents.model（shogun, karo, ashigaru）を読み取る。JSON で未設定時のフォールバックに使用。</summary>
+    private (string? modelShogun, string? modelKaro, string? modelAshigaru) ReadYamlAgentsModel()
+    {
+        string? modelShogun = null;
+        string? modelKaro = null;
+        string? modelAshigaru = null;
+        if (!File.Exists(_yamlPath))
+            return (modelShogun, modelKaro, modelAshigaru);
+        var lines = File.ReadAllLines(_yamlPath);
+        var inAgents = false;
+        var inModel = false;
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (string.IsNullOrEmpty(trimmed) || trimmed.StartsWith('#'))
+            {
+                if (trimmed.StartsWith("#") && trimmed.Length > 1 && char.IsLetter(trimmed[1]))
+                    inAgents = inModel = false;
+                continue;
+            }
+            if (trimmed.Equals("agents:", StringComparison.Ordinal))
+            {
+                inAgents = true;
+                inModel = false;
+                continue;
+            }
+            if (!inAgents)
+                continue;
+            if (trimmed.StartsWith("model:", StringComparison.Ordinal))
+            {
+                inModel = true;
+                continue;
+            }
+            if (!inModel)
+                continue;
+            if (trimmed.StartsWith("shogun:", StringComparison.Ordinal))
+            {
+                var v = ExtractYamlValue(trimmed.Substring("shogun:".Length));
+                if (!string.IsNullOrWhiteSpace(v)) modelShogun = v;
+                continue;
+            }
+            if (trimmed.StartsWith("karo:", StringComparison.Ordinal))
+            {
+                var v = ExtractYamlValue(trimmed.Substring("karo:".Length));
+                if (!string.IsNullOrWhiteSpace(v)) modelKaro = v;
+                continue;
+            }
+            if (trimmed.StartsWith("ashigaru:", StringComparison.Ordinal))
+            {
+                var v = ExtractYamlValue(trimmed.Substring("ashigaru:".Length));
+                if (!string.IsNullOrWhiteSpace(v)) modelAshigaru = v;
+                continue;
+            }
+            if (line.Length > 0 && !char.IsWhiteSpace(line[0]))
+                inAgents = inModel = false;
+        }
+        return (modelShogun, modelKaro, modelAshigaru);
     }
 
     private static string ExtractYamlValue(string part)
@@ -281,7 +379,7 @@ logging:
         return v;
     }
 
-    private void WriteYamlPaths(string skillSavePath, string skillLocalPath, string screenshotPath, string logLevel, string logPath)
+    private void WriteYamlPaths(string skillSavePath, string skillLocalPath, string screenshotPath, string logLevel, string logPath, int ashigaruCount = 0, string modelShogun = "", string modelKaro = "", string modelAshigaru = "")
     {
         var dir = Path.GetDirectoryName(_yamlPath);
         if (!string.IsNullOrEmpty(dir))
@@ -358,41 +456,108 @@ logging:
 
         if (!File.Exists(_yamlPath) || result.Count == 0)
         {
-            WriteFullDefaultYaml(skillSavePath, skillLocalPath, screenshotPath, logPath);
+            WriteFullDefaultYaml(skillSavePath, skillLocalPath, screenshotPath, logPath, modelShogun, modelKaro, modelAshigaru);
             return;
+        }
+
+        var hasAshigaruCount = result.Any(l => l.TrimStart().StartsWith("ashigaru_count:", StringComparison.Ordinal));
+        if (ashigaruCount >= 1 && ashigaruCount <= 20)
+        {
+            if (hasAshigaruCount)
+            {
+                for (var i = 0; i < result.Count; i++)
+                {
+                    if (result[i].TrimStart().StartsWith("ashigaru_count:", StringComparison.Ordinal))
+                    {
+                        result[i] = "ashigaru_count: " + ashigaruCount;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                var insertIdx = 0;
+                for (var i = 0; i < result.Count; i++)
+                {
+                    if (result[i].TrimStart().StartsWith("#", StringComparison.Ordinal) && result[i].Contains("設定", StringComparison.Ordinal))
+                    {
+                        insertIdx = i + 1;
+                        break;
+                    }
+                }
+                result.Insert(insertIdx, "ashigaru_count: " + ashigaruCount);
+                result.Insert(insertIdx, "");
+            }
+        }
+
+        var inAgents = false;
+        var inAgentsModel = false;
+        var agentsModelStart = -1;
+        var agentsModelEnd = -1;
+        for (var i = 0; i < result.Count; i++)
+        {
+            var t = result[i].Trim();
+            if (t.Equals("agents:", StringComparison.Ordinal)) { inAgents = true; inAgentsModel = false; continue; }
+            if (!inAgents) continue;
+            if (t.StartsWith("model:", StringComparison.Ordinal)) { inAgentsModel = true; agentsModelStart = i; agentsModelEnd = i; continue; }
+            if (!inAgentsModel) continue;
+            if (t.StartsWith("shogun:")) { result[i] = "    shogun: " + quote(modelShogun); agentsModelEnd = i; continue; }
+            if (t.StartsWith("karo:")) { result[i] = "    karo: " + quote(modelKaro); agentsModelEnd = i; continue; }
+            if (t.StartsWith("ashigaru:")) { result[i] = "    ashigaru: " + quote(modelAshigaru); agentsModelEnd = i; continue; }
+            if (t.Length > 0 && !char.IsWhiteSpace(result[i][0])) { inAgents = inAgentsModel = false; }
+        }
+        if (agentsModelStart < 0)
+        {
+            result.Add("");
+            result.Add("# エージェント用モデル（将軍・家老・足軽）");
+            result.Add("agents:");
+            result.Add("  model:");
+            result.Add("    shogun: " + quote(modelShogun));
+            result.Add("    karo: " + quote(modelKaro));
+            result.Add("    ashigaru: " + quote(modelAshigaru));
         }
 
         File.WriteAllLines(_yamlPath, result);
     }
 
-    private (string apiKey, string modelName, string apiEndpoint, string repoRoot) ReadJsonApi()
+    private (string modelName, string? modelShogun, string? modelKaro, string? modelAshigaru, int ashigaruCount, string apiEndpoint, string repoRoot, bool thinkingShogun, bool thinkingKaro, bool thinkingAshigaru) ReadJsonApi()
     {
         if (!File.Exists(_jsonPath))
-            return (string.Empty, "claude-sonnet-4-20250514", string.Empty, string.Empty);
+            return (string.Empty, null, null, null, 0, string.Empty, string.Empty, false, false, false);
         try
         {
             var json = File.ReadAllText(_jsonPath);
             var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            var apiKey = root.TryGetProperty("apiKey", out var ak) ? ak.GetString() ?? string.Empty : string.Empty;
-            var defaultModel = "claude-sonnet-4-20250514";
-            var modelName = root.TryGetProperty("modelName", out var mn) ? mn.GetString() ?? defaultModel : defaultModel;
+            var modelName = root.TryGetProperty("modelName", out var mn) ? mn.GetString() ?? string.Empty : string.Empty;
+            var modelShogun = root.TryGetProperty("modelShogun", out var ms) ? ms.GetString() : null;
+            var modelKaro = root.TryGetProperty("modelKaro", out var mk) ? mk.GetString() : null;
+            var modelAshigaru = root.TryGetProperty("modelAshigaru", out var ma) ? ma.GetString() : null;
+            var ashigaruCount = 0;
+            if (root.TryGetProperty("ashigaruCount", out var ac))
+            {
+                if (ac.ValueKind == JsonValueKind.Number && ac.TryGetInt32(out var n))
+                    ashigaruCount = n;
+            }
             var apiEndpoint = root.TryGetProperty("apiEndpoint", out var ae) ? ae.GetString() ?? string.Empty : string.Empty;
             var repoRoot = root.TryGetProperty("repoRoot", out var rr) ? rr.GetString() ?? string.Empty : string.Empty;
-            return (apiKey ?? string.Empty, modelName ?? defaultModel, apiEndpoint ?? string.Empty, repoRoot ?? string.Empty);
+            var thinkingShogun = root.TryGetProperty("thinkingShogun", out var ts) && ts.ValueKind == JsonValueKind.True;
+            var thinkingKaro = root.TryGetProperty("thinkingKaro", out var tk) && tk.ValueKind == JsonValueKind.True;
+            var thinkingAshigaru = root.TryGetProperty("thinkingAshigaru", out var ta) && ta.ValueKind == JsonValueKind.True;
+            return (modelName ?? string.Empty, modelShogun, modelKaro, modelAshigaru, ashigaruCount, apiEndpoint ?? string.Empty, repoRoot ?? string.Empty, thinkingShogun, thinkingKaro, thinkingAshigaru);
         }
         catch
         {
-            return (string.Empty, "claude-sonnet-4-20250514", string.Empty, string.Empty);
+            return (string.Empty, null, null, null, 0, string.Empty, string.Empty, false, false, false);
         }
     }
 
-    private void WriteJsonApi(string apiKey, string modelName, string apiEndpoint, string repoRoot)
+    private void WriteJsonApi(string modelName, string modelShogun, string modelKaro, string modelAshigaru, int ashigaruCount, string apiEndpoint, string repoRoot, bool thinkingShogun, bool thinkingKaro, bool thinkingAshigaru)
     {
         var dir = Path.GetDirectoryName(_jsonPath);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        var o = new { apiKey, modelName, apiEndpoint, repoRoot };
+        var o = new { modelName, modelShogun, modelKaro, modelAshigaru, ashigaruCount, apiEndpoint, repoRoot, thinkingShogun, thinkingKaro, thinkingAshigaru };
         var json = JsonSerializer.Serialize(o, JsonOptions);
         File.WriteAllText(_jsonPath, json);
     }

@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -15,23 +16,44 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        Opened += OnOpened;
     }
 
-    private void OnSettingsClick(object? sender, RoutedEventArgs e)
+    /// <summary>ウィンドウ表示後、Claude Code 環境の準備を開始する（RealTimeTranslator の OnStartup → InitializeModelsAsync と同様）。</summary>
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+        _ = vm.InitializeClaudeCodeEnvironmentAsync().ContinueWith(t =>
+        {
+            if (t.IsFaulted && t.Exception != null)
+            {
+                var ex = t.Exception.GetBaseException();
+                global::Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                {
+                    vm.LoadingMessage = $"準備エラー: {ex.Message}";
+                    vm.IsLoading = false;
+                });
+            }
+        }, TaskScheduler.Default);
+    }
+
+    private async void OnSettingsClick(object? sender, RoutedEventArgs e)
     {
         var w = new SettingsWindow();
-        w.DataContext = new SettingsViewModel(_settingsService, () =>
+        var mainVm = DataContext as MainWindowViewModel;
+        var vm = new SettingsViewModel(_settingsService, mainVm?.ClaudeModelsService, () =>
         {
             w.Close();
-            if (DataContext is MainWindowViewModel vm)
-            {
-                vm.RefreshAiService();
-            }
+            if (DataContext is MainWindowViewModel m)
+                m.RefreshAiService();
         });
-        w.Show();
+        vm.SetInitialModels(mainVm?.LastFetchedModels);
+        w.DataContext = vm;
+        await w.ShowDialog(this);
     }
 
-    private void OnProjectSettingsClick(object? sender, RoutedEventArgs e)
+    private async void OnProjectSettingsClick(object? sender, RoutedEventArgs e)
     {
         var w = new ProjectSettingsWindow();
         w.DataContext = new ProjectSettingsViewModel(_projectService, () =>
@@ -42,7 +64,7 @@ public partial class MainWindow : Window
                 vm.LoadProjects();
             }
         });
-        w.Show();
+        await w.ShowDialog(this);
     }
 
     private async void OnChatInputKeyDown(object? sender, KeyEventArgs e)

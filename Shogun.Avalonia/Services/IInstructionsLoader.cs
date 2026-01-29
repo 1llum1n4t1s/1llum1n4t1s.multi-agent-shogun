@@ -5,6 +5,9 @@ namespace Shogun.Avalonia.Services;
 /// </summary>
 public interface IInstructionsLoader
 {
+    /// <summary>instructions/shogun.md の内容。見つからない場合は null または埋め込み用の最小テキスト。</summary>
+    string? LoadShogunInstructions();
+
     /// <summary>instructions/karo.md の内容。見つからない場合は null または埋め込み用の最小テキスト。</summary>
     string? LoadKaroInstructions();
 

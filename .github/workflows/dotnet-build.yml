@@ -1,0 +1,24 @@
+name: .NET ビルド
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    name: .NET ビルド
+    runs-on: windows-latest
+    if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 依存関係を復元
+        run: dotnet restore Shogun.Avalonia.slnx
+
+      - name: ビルド
+        run: dotnet build Shogun.Avalonia.slnx --configuration Release --no-restore

@@ -5,12 +5,15 @@ using Shogun.Avalonia.Models;
 namespace Shogun.Avalonia.Services;
 
 /// <summary>
-/// フォーク元の queue / dashboard を読み書きするサービス（将軍→家老の指示・dashboard 読み取り）。WSL/tmux は使用しない。
+/// フォーク元の queue / dashboard を読み書きするサービス（将軍→家老の指示・dashboard 読み取り）。
 /// </summary>
 public interface IShogunQueueService
 {
     /// <summary>ワークスペースルート（queue/dashboard/instructions の親フォルダ）。空のときは config の親を使用。</summary>
     string GetRepoRoot();
+
+    /// <summary>足軽の人数（1～20）。設定に従う。</summary>
+    int GetAshigaruCount();
 
     /// <summary>queue/shogun_to_karo.yaml の queue を読み取る。</summary>
     IReadOnlyList<ShogunCommand> ReadShogunToKaro();
@@ -24,10 +27,10 @@ public interface IShogunQueueService
     /// <summary>dashboard.md の内容を読み取る。</summary>
     string ReadDashboardMd();
 
-    /// <summary>queue/tasks/ashigaru{N}.yaml の内容を読み取る。N は 1～8。</summary>
+    /// <summary>queue/tasks/ashigaru{N}.yaml の内容を読み取る。N は 1～GetAshigaruCount()。</summary>
     string ReadTaskYaml(int ashigaruIndex);
 
-    /// <summary>queue/reports/ashigaru{N}_report.yaml の内容を読み取る。N は 1～8。</summary>
+    /// <summary>queue/reports/ashigaru{N}_report.yaml の内容を読み取る。N は 1～GetAshigaruCount()。</summary>
     string ReadReportYaml(int ashigaruIndex);
 
     /// <summary>queue/tasks/ashigaru{N}.yaml を書き込む（フォーク元形式）。</summary>

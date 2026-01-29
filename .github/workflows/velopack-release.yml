@@ -1,0 +1,125 @@
+name: Velopack リリース作成
+
+on:
+  push:
+    branches:
+      - 'release/*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Velopack リリース作成
+    runs-on: windows-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 依存関係を復元
+        run: dotnet restore Shogun.Avalonia.slnx
+
+      - name: リリースバージョンを設定（release/1.0.50 → 1.0.50）
+        shell: pwsh
+        run: |
+          $ref = "${{ github.ref }}"
+          if ($ref -match 'refs/heads/release/(.+)') {
+            $version = $matches[1]
+          } else {
+            Write-Error "Branch name must be release/X.Y.Z (e.g. release/1.0.50). Got: $ref"
+            exit 1
+          }
+          Write-Host "Release version: $version"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "RELEASE_VERSION=$version" -Encoding utf8
+
+      - name: ターゲットフレームワークを取得
+        shell: pwsh
+        run: |
+          $csprojPath = "Shogun.Avalonia/Shogun.Avalonia.csproj"
+          $content = Get-Content -Path $csprojPath -Raw
+          if ($content -match '<TargetFramework>([^<]+)</TargetFramework>') {
+            $targetFramework = $matches[1]
+          } else {
+            Write-Error "TargetFramework not found in csproj"
+            exit 1
+          }
+          Write-Host "TargetFramework: $targetFramework"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "TARGET_FRAMEWORK=$targetFramework" -Encoding utf8
+
+      - name: アプリを公開ビルド
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path "Shogun.Avalonia" "bin" "Release" "$env:TARGET_FRAMEWORK" "win-x64" "publish"
+          if (Test-Path $publishDir) {
+            Remove-Item -Path $publishDir -Recurse -Force
+          }
+          dotnet publish "Shogun.Avalonia/Shogun.Avalonia.csproj" `
+            -c Release `
+            -r win-x64 `
+            --self-contained false `
+            -p:Version=$env:RELEASE_VERSION
+          $exePath = Join-Path $publishDir "Shogun.Avalonia.exe"
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Shogun.Avalonia.exe not found at: $exePath"
+            exit 1
+          }
+          Write-Host "Built: $exePath"
+
+      - name: Velopack CLI をインストール
+        shell: pwsh
+        run: |
+          dotnet tool install --global vpk
+          $toolsPath = "$env:USERPROFILE\.dotnet\tools"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $toolsPath -Encoding utf8
+
+      - name: Velopack パッケージを作成
+        shell: pwsh
+        run: |
+          $publishDir = Join-Path "Shogun.Avalonia" "bin" "Release" "$env:TARGET_FRAMEWORK" "win-x64" "publish"
+          $outputDir = "artifacts"
+          if (Test-Path $outputDir) {
+            Remove-Item -Path $outputDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          vpk pack `
+            --packId Shogun.Avalonia `
+            --packVersion $env:RELEASE_VERSION `
+            --packTitle "Shogun.Avalonia" `
+            --mainExe Shogun.Avalonia.exe `
+            --packDir $publishDir `
+            --outputDir $outputDir `
+            --shortcuts "StartMenu,Desktop"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "Velopack パッケージ作成完了"
+
+      - name: 既存リリースを削除（同タグがある場合）
+        shell: pwsh
+        run: |
+          $tag = $env:RELEASE_VERSION
+          $existing = gh release view $tag --repo "${{ github.repository }}" 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Deleting existing release: $tag"
+            gh release delete $tag --repo "${{ github.repository }}" --yes
+          }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: GitHub Releases にアップロード
+        shell: pwsh
+        run: |
+          $repoUrl = "https://github.com/${{ github.repository }}"
+          $releaseName = "Shogun.Avalonia $env:RELEASE_VERSION"
+          vpk upload github `
+            --repoUrl $repoUrl `
+            --token "${{ secrets.GITHUB_TOKEN }}" `
+            --outputDir artifacts `
+            --channel win `
+            --publish `
+            --releaseName $releaseName
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Write-Host "GitHub Releases へのアップロード完了"
