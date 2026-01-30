@@ -89,7 +89,28 @@ Right-click and select **"Run as administrator"** (required if WSL2 is not yet i
 </td>
 <td>
 
-✅ **Done!** 10 AI agents are now running.
+🐧 **Open Ubuntu and run** (first time only)
+
+```bash
+cd /mnt/c/tools/multi-agent-shogun
+./first_setup.sh
+```
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Step 4**
+
+</td>
+<td>
+
+✅ **Deploy!**
+
+```bash
+./shutsujin_departure.sh
+```
 
 </td>
 </tr>
@@ -103,15 +124,6 @@ Open **Ubuntu terminal** (WSL) and run:
 cd /mnt/c/tools/multi-agent-shogun
 ./shutsujin_departure.sh
 ```
-
-#### 🔐 First-Time Authentication (One Time Only)
-
-1. After running `./shutsujin_departure.sh`, a login screen appears in each pane
-2. **In just ONE pane**, copy the URL and open it in your browser to log in
-3. After authentication, press `Ctrl+C` in other panes and re-run `claude --dangerously-skip-permissions`
-4. Credentials are saved to `~/.claude/` and won't be needed again
-
-> **Note:** You don't need to log in separately on every pane.
 
 ---
 
@@ -153,9 +165,9 @@ cd ~/multi-agent-shogun
 ### Don't have WSL2 yet?
 
 No problem! When you run `install.bat`, it will:
-1. Check if WSL2 is installed
-2. If not, show you exactly how to install it
-3. Guide you through the entire process
+1. Check if WSL2 is installed (auto-install if missing)
+2. Check if Ubuntu is installed (auto-install if missing)
+3. Guide you to the next steps (`first_setup.sh`)
 
 **Quick install command** (run in PowerShell as Administrator):
 ```powershell
@@ -173,20 +185,18 @@ Then restart your computer and run `install.bat` again.
 
 | Script | Purpose | When to Run |
 |--------|---------|-------------|
-| `install.bat` | Windows: First-time setup (runs first_setup.sh via WSL) | First time only |
+| `install.bat` | Windows: WSL2 + Ubuntu setup | First time only |
 | `first_setup.sh` | Installs tmux, Node.js, Claude Code CLI + configures Memory MCP | First time only |
 | `shutsujin_departure.sh` | Creates tmux sessions + starts Claude Code + loads instructions | Every day |
 
 ### What `install.bat` does automatically:
-- ✅ Checks if WSL2 is installed
-- ✅ Opens Ubuntu and runs `first_setup.sh`
-- ✅ Installs tmux, Node.js, and Claude Code CLI
-- ✅ Creates necessary directories
-- ✅ Configures Memory MCP server (for cross-session memory)
+- ✅ Checks if WSL2 is installed (auto-install if missing)
+- ✅ Checks if Ubuntu is installed (auto-install if missing)
+- ✅ Guides you to the next steps (`first_setup.sh`)
 
 ### What `shutsujin_departure.sh` does:
 - ✅ Creates tmux sessions (shogun + multiagent)
-- ✅ Launches Claude Code on all 10 agents
+- ✅ Launches Claude Code on all agents
 - ✅ Automatically loads instruction files for each agent
 - ✅ Resets queue files for a fresh start
 
@@ -215,7 +225,7 @@ If you prefer to install dependencies manually:
 
 ### ✅ What Happens After Setup
 
-After running either option, **10 AI agents** will start automatically:
+After running either option, **AI agents** will start automatically:
 
 | Agent | Role | Quantity |
 |-------|------|----------|
@@ -387,6 +397,8 @@ Skills are not included in this repository by default.
 As you use the system, skill candidates will appear in `dashboard.md`.
 Review and approve them to grow your personal skill library.
 
+Skills can be invoked with `/skill-name`. Just tell the Shogun: "run `/skill-name`".
+
 ---
 
 ## 🏛️ Design Philosophy
@@ -397,19 +409,24 @@ The Shogun → Karo → Ashigaru hierarchy exists for:
 
 1. **Immediate Response**: Shogun delegates instantly and returns control to you
 2. **Parallel Execution**: Karo distributes to multiple Ashigaru simultaneously
-3. **Separation of Concerns**: Shogun decides "what", Karo decides "who"
+3. **Separation of Concerns**: Each role is clearly defined — Shogun decides "what", Karo decides "who"
+4. **Scalability**: Adding more Ashigaru doesn't break the structure
+5. **Fault Isolation**: One Ashigaru failing doesn't affect others
+6. **Centralized Reporting**: Only Shogun communicates with you, keeping information organized
 
 ### Why YAML + send-keys?
 
-- **YAML files**: Structured communication that survives agent restarts
+- **YAML files**: Structured communication that survives agent restarts and is human-readable for debugging
 - **send-keys**: Event-driven wakeups (no polling = no wasted API calls)
 - **No direct calls**: Agents can't interrupt each other or your input
+- **Conflict avoidance**: Each Ashigaru has dedicated files, preventing race conditions
 
 ### Why Only Karo Updates Dashboard?
 
 - **Single responsibility**: One writer = no conflicts
 - **Information hub**: Karo receives all reports, knows the full picture
 - **Consistency**: All updates go through one quality gate
+- **No interruptions**: Prevents disrupting your input when Shogun would otherwise update the dashboard
 
 ### How Skills Work
 
@@ -421,12 +438,18 @@ Skills (`.claude/commands/`) are **not committed to this repository** by design.
 - No one-size-fits-all solution
 
 **How to create new skills:**
-1. Ashigaru report "skill candidates" when they notice repeatable patterns
-2. Candidates appear in `dashboard.md` under "Skill Candidates"
-3. You review and approve (or reject)
-4. Approved skills are created by Karo
 
-This keeps skills **user-driven** — only what you find useful gets added.
+```
+Ashigaru notices a repeatable pattern during work
+    ↓
+Candidate appears in dashboard.md under "Skill Candidates"
+    ↓
+You (the Lord) review the candidate
+    ↓
+If approved, Karo creates the skill
+```
+
+Skills are **user-driven** — they only grow when you decide they're useful. Automatic growth would make them unmanageable, so only what you explicitly approve gets added.
 
 ---
 
@@ -534,12 +557,15 @@ language: en   # Japanese + English translation
 │                                                                     │
 │  install.bat (Windows)                                              │
 │      │                                                              │
-│      └──▶ first_setup.sh (via WSL)                                  │
-│                │                                                    │
-│                ├── Check/Install tmux                               │
-│                ├── Check/Install Node.js v20+ (via nvm)             │
-│                ├── Check/Install Claude Code CLI                    │
-│                └── Configure Memory MCP server                      │
+│      ├── Check/Install WSL2                                         │
+│      └── Check/Install Ubuntu                                       │
+│                                                                     │
+│  first_setup.sh (run manually in Ubuntu/WSL)                        │
+│      │                                                              │
+│      ├── Check/Install tmux                                         │
+│      ├── Check/Install Node.js v20+ (via nvm)                      │
+│      ├── Check/Install Claude Code CLI                              │
+│      └── Configure Memory MCP server                                │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │                      DAILY STARTUP (Run Every Day)                  │
@@ -609,6 +635,20 @@ tmux kill-session -t multiagent
 # Start fresh
 ./shutsujin_departure.sh
 ```
+
+</details>
+
+<details>
+<summary><b>Convenient Aliases</b> (Click to expand)</summary>
+
+Running `first_setup.sh` automatically adds these aliases to `~/.bashrc`:
+
+```bash
+alias css='cd /mnt/c/tools/multi-agent-shogun && ./shutsujin_departure.sh'  # Setup + deploy
+alias csm='cd /mnt/c/tools/multi-agent-shogun'                              # Navigate to directory only
+```
+
+*To apply aliases, run `source ~/.bashrc` or restart your terminal. On WSL, run `wsl --shutdown` in PowerShell first — simply closing the window does not terminate WSL.*
 
 </details>
 

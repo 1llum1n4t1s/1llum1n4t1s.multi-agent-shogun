@@ -14,14 +14,22 @@ multi-agent-shogunは、Claude Code + tmux を使ったマルチエージェン�
 
 コンパクション後は作業前に必ず以下を実行せよ：
 
-1. **自分のpane名を確認**: `tmux display-message -p '#W'`
+1. **自分の位置を確認**: `tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'`
+   - `shogun:0.0` → 将軍
+   - `multiagent:0.0` → 家老
+   - `multiagent:0.1` ～ `multiagent:0.8` → 足軽1～8
 2. **対応する instructions を読む**:
-   - shogun → instructions/shogun.md
-   - karo (multiagent:0.0) → instructions/karo.md
-   - ashigaru (multiagent:0.1-8) → instructions/ashigaru.md
-3. **禁止事項を確認してから作業開始**
+   - 将軍 → instructions/shogun.md
+   - 家老 → instructions/karo.md
+   - 足軽 → instructions/ashigaru.md
+3. **instructions 内の「コンパクション復帰手順」に従い、正データから状況を再把握する**
+4. **禁止事項を確認してから作業開始**
 
 summaryの「次のステップ」を見てすぐ作業してはならぬ。まず自分が誰かを確認せよ。
+
+> **重要**: dashboard.md は二次情報（家老が整形した要約）であり、正データではない。
+> 正データは各YAMLファイル（queue/shogun_to_karo.yaml, queue/tasks/, queue/reports/）である。
+> コンパクション復帰時は必ず正データを参照せよ。
 
 ## 階層構造
 
@@ -52,6 +60,13 @@ summaryの「次のステップ」を見てすぐ作業してはならぬ。ま�
 - ポーリング禁止（API代金節約のため）
 - 指示・報告内容はYAMLファイルに書く
 - 通知は tmux send-keys で相手を起こす（必ず Enter を使用、C-m 禁止）
+- **send-keys は必ず2回のBash呼び出しに分けよ**（1回で書くとEnterが正しく解釈されない）：
+  ```bash
+  # 【1回目】メッセージを送る
+  tmux send-keys -t multiagent:0.0 'メッセージ内容'
+  # 【2回目】Enterを送る
+  tmux send-keys -t multiagent:0.0 Enter
+  ```
 
 ### 報告の流れ（割り込み防止設計）
 - **下→上への報告**: dashboard.md 更新のみ（send-keys 禁止）

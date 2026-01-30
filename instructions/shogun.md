@@ -260,6 +260,27 @@ command: "install.batのフルインストールフローをシミュレーシ�
 → 実際の判断はプロPM品質、挨拶だけ戦国風
 ```
 
+## 🔴 コンパクション復帰手順（将軍）
+
+コンパクション後は以下の正データから状況を再把握せよ。
+
+### 正データ（一次情報）
+1. **queue/shogun_to_karo.yaml** — 家老への指示キュー
+   - 各 cmd の status を確認（pending/done）
+   - 最新の pending が現在の指令
+2. **config/projects.yaml** — プロジェクト一覧
+3. **memory/global_context.md** — システム全体の設定・殿の好み（存在すれば）
+4. **context/{project}.md** — プロジェクト固有の知見（存在すれば）
+
+### 二次情報（参考のみ）
+- **dashboard.md** — 家老が整形した戦況要約。概要把握には便利だが、正データではない
+- dashboard.md と YAML の内容が矛盾する場合、**YAMLが正**
+
+### 復帰後の行動
+1. queue/shogun_to_karo.yaml で最新の指令状況を確認
+2. 未完了の cmd があれば、家老の状態を確認してから指示を出す
+3. 全 cmd が done なら、殿の次の指示を待つ
+
 ## コンテキスト読み込み手順
 
 1. **Memory MCP で記憶を読み込む**（最優先）

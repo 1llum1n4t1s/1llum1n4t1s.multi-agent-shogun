@@ -350,6 +350,11 @@ if [ ! -f "$SCRIPT_DIR/config/settings.yaml" ]; then
 # その他の言語コード（es, zh, ko, fr, de 等）も対応
 language: ja
 
+# シェル設定
+# bash: bash用プロンプト（デフォルト）
+# zsh: zsh用プロンプト
+shell: bash
+
 # スキル設定
 skill:
   # スキル保存先（スキル名に shogun- プレフィックスを付けて保存）
@@ -384,6 +389,27 @@ EOF
     log_success "projects.yaml を作成しました"
 else
     log_info "config/projects.yaml は既に存在します"
+fi
+
+# memory/global_context.md（システム全体のコンテキスト）
+if [ ! -f "$SCRIPT_DIR/memory/global_context.md" ]; then
+    log_info "memory/global_context.md を作成中..."
+    cat > "$SCRIPT_DIR/memory/global_context.md" << 'EOF'
+# グローバルコンテキスト
+最終更新: (未設定)
+
+## システム方針
+- (殿の好み・方針をここに記載)
+
+## プロジェクト横断の決定事項
+- (複数プロジェクトに影響する決定をここに記載)
+
+## 注意事項
+- (全エージェントが知るべき注意点をここに記載)
+EOF
+    log_success "global_context.md を作成しました"
+else
+    log_info "memory/global_context.md は既に存在します"
 fi
 
 RESULTS+=("設定ファイル: OK")
@@ -459,15 +485,15 @@ BASHRC_FILE="$HOME/.bashrc"
 # aliasが既に存在するかチェックし、なければ追加
 ALIAS_ADDED=false
 
-# css alias (出陣コマンド)
+# css alias (将軍ウィンドウの起動)
 if [ -f "$BASHRC_FILE" ]; then
-    EXPECTED_CSS="alias css='cd \"$SCRIPT_DIR\" && ./shutsujin_departure.sh'"
+    EXPECTED_CSS="alias css='tmux attach-session -t shogun'"
     if ! grep -q "alias css=" "$BASHRC_FILE" 2>/dev/null; then
         # alias が存在しない → 新規追加
         echo "" >> "$BASHRC_FILE"
         echo "# multi-agent-shogun aliases (added by first_setup.sh)" >> "$BASHRC_FILE"
         echo "$EXPECTED_CSS" >> "$BASHRC_FILE"
-        log_info "alias css を追加しました（出陣コマンド）"
+        log_info "alias css を追加しました（将軍ウィンドウの起動）"
         ALIAS_ADDED=true
     elif ! grep -qF "$EXPECTED_CSS" "$BASHRC_FILE" 2>/dev/null; then
         # alias は存在するがパスが異なる → 更新
@@ -481,15 +507,15 @@ if [ -f "$BASHRC_FILE" ]; then
         log_info "alias css は既に正しく設定されています"
     fi
 
-    # csm alias (ディレクトリ移動)
-    EXPECTED_CSM="alias csm='cd \"$SCRIPT_DIR\"'"
+    # csm alias (家老・足軽ウィンドウの起動)
+    EXPECTED_CSM="alias csm='tmux attach-session -t multiagent'"
     if ! grep -q "alias csm=" "$BASHRC_FILE" 2>/dev/null; then
         if [ "$ALIAS_ADDED" = false ]; then
             echo "" >> "$BASHRC_FILE"
             echo "# multi-agent-shogun aliases (added by first_setup.sh)" >> "$BASHRC_FILE"
         fi
         echo "$EXPECTED_CSM" >> "$BASHRC_FILE"
-        log_info "alias csm を追加しました（ディレクトリ移動）"
+        log_info "alias csm を追加しました（家老・足軽ウィンドウの起動）"
         ALIAS_ADDED=true
     elif ! grep -qF "$EXPECTED_CSM" "$BASHRC_FILE" 2>/dev/null; then
         if sed -i "s|alias csm=.*|$EXPECTED_CSM|" "$BASHRC_FILE" 2>/dev/null; then
@@ -585,8 +611,12 @@ echo "  出陣（全エージェント起動）:"
 echo "     ./shutsujin_departure.sh"
 echo ""
 echo "  オプション:"
-echo "     ./shutsujin_departure.sh -s   # セットアップのみ（Claude手動起動）"
-echo "     ./shutsujin_departure.sh -t   # Windows Terminalタブ展開"
+echo "     ./shutsujin_departure.sh -s            # セットアップのみ（Claude手動起動）"
+echo "     ./shutsujin_departure.sh -t            # Windows Terminalタブ展開"
+echo "     ./shutsujin_departure.sh -shell bash   # bash用プロンプトで起動"
+echo "     ./shutsujin_departure.sh -shell zsh    # zsh用プロンプトで起動"
+echo ""
+echo "  ※ シェル設定は config/settings.yaml の shell: でも変更可能です"
 echo ""
 echo "  詳細は README.md を参照してください。"
 echo ""
