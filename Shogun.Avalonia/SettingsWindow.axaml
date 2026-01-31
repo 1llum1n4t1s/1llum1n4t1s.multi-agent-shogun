@@ -7,10 +7,10 @@
         mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="450"
         x:Class="Shogun.Avalonia.SettingsWindow"
         x:DataType="vm:SettingsViewModel"
-        Title="設定 - Shogun.Avalonia"
-        Width="520" Height="450"
-        WindowStartupLocation="CenterScreen"
-        CanResize="False">
+    Title="設定 - Shogun.Avalonia"
+    Width="550" Height="700"
+    WindowStartupLocation="CenterScreen"
+    CanResize="True">
     <Window.Resources>
         <util:BoolToColorConverter x:Key="LoginColorConverter" TrueColor="Green" FalseColor="Red"/>
     </Window.Resources>
@@ -55,6 +55,22 @@
 
                 <!-- 足軽人数（アプリ固有） -->
                 <TextBlock Text="エージェント（アプリ固有）" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                
+                <!-- 家老の権限設定 -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="家老のコード改修 権限モード" FontWeight="SemiBold"/>
+                    <ComboBox ItemsSource="{Binding KaroPermissionModeOptions}" SelectedItem="{Binding KaroExecutionPermissionMode}" MinWidth="200" HorizontalAlignment="Left">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding}"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="• AlwaysAllow: 家老がコード改修を自動実行
+• AlwaysReject: 家老は分析のみ実行
+• PromptUser: 各改修時に許可/却下を確認（推奨）" FontSize="11" Foreground="Gray" TextWrapping="Wrap"/>
+                </StackPanel>
+
                 <StackPanel Spacing="4">
                     <TextBlock Text="足軽の人数（1～20）"/>
                     <ComboBox ItemsSource="{Binding AshigaruCountOptions}" SelectedItem="{Binding AshigaruCount}" MinWidth="80" HorizontalAlignment="Left"/>
@@ -85,29 +101,15 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- 家老の権限設定（新規） -->
-                <TextBlock Text="家老の権限設定" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                <!-- ドキュメントルート設定 -->
+                <TextBlock Text="ドキュメント出力設定" FontWeight="SemiBold" Margin="0,8,0,0"/>
                 <StackPanel Spacing="4">
-                    <TextBlock Text="コード改修の確認モード"/>
-                    <ComboBox ItemsSource="{Binding KaroPermissionModeOptions}" SelectedItem="{Binding KaroExecutionPermissionMode}" MinWidth="200" HorizontalAlignment="Left"/>
-                    <TextBlock Text="• 常に許可: 家老がコード改修を自動実行（開発用）
-• 常に却下: 家老は分析のみ実行（安全）
-• ユーザー確認: 各改修時に許可/却下を確認（推奨）" FontSize="11" Foreground="Gray" TextWrapping="Wrap"/>
-                </StackPanel>
-
-                <!-- Claude Code ログイン状態 -->
-                <TextBlock Text="Claude Code 認証" FontWeight="SemiBold" Margin="0,8,0,0"/>
-                <StackPanel Spacing="8">
+                    <TextBlock Text="ドキュメントルート (DocumentRoot)"/>
                     <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0" Text="{Binding LoginStatusMessage}" VerticalAlignment="Center" 
-                                   Foreground="{Binding IsClaudeLoggedIn, Converter={StaticResource LoginColorConverter}}"/>
-                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                            <Button Content="再確認" Command="{Binding CheckLoginStatusCommand}" IsEnabled="{Binding !IsCheckingLogin}"/>
-                            <Button Content="ログイン実行" Command="{Binding LoginClaudeCommand}" IsEnabled="{Binding !IsCheckingLogin}"/>
-                        </StackPanel>
+                        <TextBox Grid.Column="0" Text="{Binding DocumentRoot}" IsReadOnly="True" Watermark="参照でフォルダを選択"/>
+                        <Button Grid.Column="1" Content="参照" Margin="8,0,0,0" Click="OnBrowseDocumentRoot"/>
                     </Grid>
-                    <TextBlock Text="※ 「ログイン実行」を押すと別ウィンドウが開きます。認証方法で「Claude Pro/Max アカウント」を選択し、ブラウザで承認してください。" 
-                               FontSize="11" Foreground="Gray" TextWrapping="Wrap"/>
+                    <TextBlock Text="※ 報告書等の出力先。プロジェクト選択時は「ドキュメントルート\プロジェクト名」に出力されます。" FontSize="11" Foreground="Gray" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <Border Height="24"/>

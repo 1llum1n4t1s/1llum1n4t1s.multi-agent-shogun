@@ -28,7 +28,7 @@ public class ClaudeCodeModelsService : IClaudeModelsService
 
     /// <summary>パッケージ名「claude-code」等を除外する。公式モデル ID はバージョン・日付で数字を含む。</summary>
     private static bool IsValidModelId(string? id) =>
-        !string.IsNullOrWhiteSpace(id) && !IsInvalidModelId(id) && ModelIdRegex.IsMatch(id) && id.Any(char.IsDigit);
+        !string.IsNullOrWhiteSpace(id) && !IsInvalidModelId(id) && ModelIdRegex.IsMatch(id);
 
     /// <summary>サービスを生成する。</summary>
     public ClaudeCodeModelsService()

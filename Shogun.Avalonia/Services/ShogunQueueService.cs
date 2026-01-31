@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using Shogun.Avalonia.Models;
+using VYaml.Serialization;
 
 namespace Shogun.Avalonia.Services;
 
@@ -13,11 +15,13 @@ namespace Shogun.Avalonia.Services;
 public class ShogunQueueService : IShogunQueueService
 {
     private readonly ISettingsService _settingsService;
+    private readonly IProjectService _projectService;
 
     /// <summary>サービスを生成する。</summary>
-    public ShogunQueueService(ISettingsService settingsService)
+    public ShogunQueueService(ISettingsService settingsService, IProjectService? projectService = null)
     {
         _settingsService = settingsService;
+        _projectService = projectService ?? new ProjectService();
     }
 
     /// <inheritdoc />
@@ -35,9 +39,13 @@ public class ShogunQueueService : IShogunQueueService
         var s = _settingsService.Get();
         if (!string.IsNullOrWhiteSpace(s.RepoRoot))
             return s.RepoRoot.TrimEnd(Path.DirectorySeparatorChar, '/');
+        
         var configDir = SettingsService.GetDefaultConfigDirectory();
         var parent = Path.GetDirectoryName(configDir);
-        return string.IsNullOrEmpty(parent) ? string.Empty : parent;
+        if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+            return parent.TrimEnd(Path.DirectorySeparatorChar, '/');
+        
+        return AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, '/');
     }
 
     /// <inheritdoc />
@@ -48,8 +56,9 @@ public class ShogunQueueService : IShogunQueueService
             return Array.Empty<ShogunCommand>();
         try
         {
-            var content = File.ReadAllText(path);
-            return ParseShogunToKaroYaml(content);
+            var bytes = File.ReadAllBytes(path);
+            var wrapper = YamlSerializer.Deserialize<ShogunQueueWrapper>(bytes);
+            return wrapper?.Queue ?? new List<ShogunCommand>();
         }
         catch
         {
@@ -62,7 +71,6 @@ public class ShogunQueueService : IShogunQueueService
     {
         var repo = GetRepoRoot();
         var queueDir = Path.Combine(repo, "queue");
-        var path = Path.Combine(queueDir, "shogun_to_karo.yaml");
         Directory.CreateDirectory(queueDir);
 
         var list = ReadShogunToKaro().ToList();
@@ -124,17 +132,21 @@ public class ShogunQueueService : IShogunQueueService
         var dir = Path.Combine(GetRepoRoot(), "queue", "tasks");
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, $"ashigaru{ashigaruIndex}.yaml");
-        var targetPathStr = targetPath ?? "null";
-        var sb = new StringBuilder();
-        sb.AppendLine($"# 足軽{ashigaruIndex}専用タスクファイル");
-        sb.AppendLine("task:");
-        sb.AppendLine($"  task_id: {EscapeYaml(taskId)}");
-        sb.AppendLine($"  parent_cmd: {EscapeYaml(parentCmd)}");
-        sb.AppendLine($"  description: {EscapeYaml(description)}");
-        sb.AppendLine($"  target_path: {EscapeYaml(targetPathStr)}");
-        sb.AppendLine($"  status: {EscapeYaml(status)}");
-        sb.AppendLine($"  timestamp: {EscapeYaml(timestamp)}");
-        File.WriteAllText(path, sb.ToString());
+        
+        var task = new TaskWrapper
+        {
+            Task = new TaskItemYaml
+            {
+                TaskId = taskId,
+                ParentCmd = parentCmd,
+                Description = description,
+                TargetPath = targetPath,
+                Status = status,
+                Timestamp = timestamp
+            }
+        };
+        var bytes = YamlSerializer.Serialize(task);
+        File.WriteAllBytes(path, bytes.ToArray());
     }
 
     /// <inheritdoc />
@@ -146,18 +158,24 @@ public class ShogunQueueService : IShogunQueueService
         var dir = Path.Combine(GetRepoRoot(), "queue", "reports");
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, $"ashigaru{ashigaruIndex}_report.yaml");
-        var sb = new StringBuilder();
-        sb.AppendLine($"worker_id: ashigaru{ashigaruIndex}");
-        sb.AppendLine($"task_id: {EscapeYaml(taskId)}");
-        sb.AppendLine($"timestamp: {EscapeYaml(timestamp)}");
-        sb.AppendLine($"status: {EscapeYaml(status)}");
-        sb.AppendLine($"result: {EscapeYaml(result)}");
-        sb.AppendLine("skill_candidate:");
-        sb.AppendLine($"  found: {skillCandidateFound.ToString().ToLowerInvariant()}");
-        sb.AppendLine($"  name: {(string.IsNullOrEmpty(skillCandidateName) ? "null" : EscapeYaml(skillCandidateName))}");
-        sb.AppendLine($"  description: {(string.IsNullOrEmpty(skillCandidateDescription) ? "null" : EscapeYaml(skillCandidateDescription))}");
-        sb.AppendLine($"  reason: {(string.IsNullOrEmpty(skillCandidateReason) ? "null" : EscapeYaml(skillCandidateReason))}");
-        File.WriteAllText(path, sb.ToString());
+        
+        var report = new ReportYaml
+        {
+            WorkerId = $"ashigaru{ashigaruIndex}",
+            TaskId = taskId,
+            Timestamp = timestamp,
+            Status = status,
+            Result = result,
+            SkillCandidate = new SkillCandidateYaml
+            {
+                Found = skillCandidateFound,
+                Name = skillCandidateName,
+                Description = skillCandidateDescription,
+                Reason = skillCandidateReason
+            }
+        };
+        var bytes = YamlSerializer.Serialize(report);
+        File.WriteAllBytes(path, bytes.ToArray());
     }
 
     /// <inheritdoc />
@@ -182,118 +200,41 @@ public class ShogunQueueService : IShogunQueueService
         }
     }
 
-    private static List<ShogunCommand> ParseShogunToKaroYaml(string content)
-    {
-        var list = new List<ShogunCommand>();
-        var lines = content.Split('\n');
-        var inQueue = false;
-        ShogunCommand? current = null;
-        var indent = 0;
-
-        for (var i = 0; i < lines.Length; i++)
-        {
-            var line = lines[i];
-            var trimmed = line.TrimEnd();
-            if (trimmed.StartsWith("queue:", StringComparison.Ordinal))
-            {
-                inQueue = true;
-                continue;
-            }
-            if (!inQueue)
-                continue;
-            if (string.IsNullOrWhiteSpace(trimmed))
-                continue;
-            var itemIndent = line.Length - line.TrimStart().Length;
-            if (trimmed.StartsWith("- ", StringComparison.Ordinal))
-            {
-                if (current != null)
-                    list.Add(current);
-                current = new ShogunCommand();
-                var rest = trimmed.Substring(2).Trim();
-                if (rest.StartsWith("id:", StringComparison.Ordinal))
-                {
-                    current.Id = ExtractYamlValue(rest.Substring(3).Trim());
-                }
-                indent = itemIndent;
-                continue;
-            }
-            if (current != null && itemIndent > indent)
-            {
-                if (trimmed.StartsWith("id:", StringComparison.Ordinal))
-                    current.Id = ExtractYamlValue(trimmed.Substring(3).Trim());
-                else if (trimmed.StartsWith("timestamp:", StringComparison.Ordinal))
-                    current.Timestamp = ExtractYamlValue(trimmed.Substring(10).Trim());
-                else if (trimmed.StartsWith("command:", StringComparison.Ordinal))
-                    current.Command = ExtractYamlValue(trimmed.Substring(8).Trim());
-                else if (trimmed.StartsWith("project:", StringComparison.Ordinal))
-                    current.Project = ExtractYamlValue(trimmed.Substring(8).Trim());
-                else if (trimmed.StartsWith("priority:", StringComparison.Ordinal))
-                    current.Priority = ExtractYamlValue(trimmed.Substring(9).Trim());
-                else if (trimmed.StartsWith("status:", StringComparison.Ordinal))
-                    current.Status = ExtractYamlValue(trimmed.Substring(7).Trim());
-            }
-        }
-        if (current != null)
-            list.Add(current);
-        return list;
-    }
-
-    private static string ExtractYamlValue(string v)
-    {
-        var t = v.Trim();
-        if (t.StartsWith('"') && t.EndsWith('"'))
-            return t.Substring(1, t.Length - 2).Replace("\\\"", "\"");
-        if (t.StartsWith('\'') && t.EndsWith('\''))
-            return t.Substring(1, t.Length - 2);
-        return t;
-    }
-
     private void WriteShogunToKaro(IReadOnlyList<ShogunCommand> list)
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("queue:");
-        foreach (var c in list)
-        {
-            sb.AppendLine($"  - id: {EscapeYaml(c.Id)}");
-            sb.AppendLine($"    timestamp: {EscapeYaml(c.Timestamp)}");
-            sb.AppendLine($"    command: {EscapeYaml(c.Command)}");
-            if (!string.IsNullOrEmpty(c.Project))
-                sb.AppendLine($"    project: {EscapeYaml(c.Project)}");
-            if (!string.IsNullOrEmpty(c.Priority))
-                sb.AppendLine($"    priority: {EscapeYaml(c.Priority)}");
-            sb.AppendLine($"    status: {EscapeYaml(c.Status)}");
-        }
+        var wrapper = new ShogunQueueWrapper { Queue = list.ToList() };
+        var bytes = YamlSerializer.Serialize(wrapper);
         var path = Path.Combine(GetRepoRoot(), "queue", "shogun_to_karo.yaml");
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        File.WriteAllText(path, sb.ToString());
+        File.WriteAllBytes(path, bytes.ToArray());
     }
 
     /// <inheritdoc />
     public void WriteMasterStatus(DateTime updated, string? currentTask, string taskStatus, string? taskDescription, IReadOnlyList<TaskAssignmentItem>? assignments)
     {
+        // master_status.yaml は構造が複雑なため、一旦現状維持か、必要なら VYaml 用のモデルを作成する。
+        // ここでは VYaml を使用するようにモデルを定義して移行する。
         var repo = GetRepoRoot();
         if (string.IsNullOrEmpty(repo))
             return;
         var dir = Path.Combine(repo, "status");
         Directory.CreateDirectory(dir);
         var path = Path.Combine(dir, "master_status.yaml");
-        var karoStatus = taskStatus == "in_progress" ? "busy" : "idle";
-        var subtaskCount = assignments?.Count ?? 0;
-        var sb = new StringBuilder();
-        sb.AppendLine("last_updated: " + EscapeYaml(updated.ToString("yyyy-MM-dd HH:mm")));
-        sb.AppendLine("current_task: " + (string.IsNullOrEmpty(currentTask) ? "null" : EscapeYaml(currentTask)));
-        sb.AppendLine("task_status: " + (string.IsNullOrEmpty(taskStatus) ? "idle" : taskStatus));
-        sb.AppendLine("task_description: " + (string.IsNullOrEmpty(taskDescription) ? "null" : EscapeYaml(taskDescription)));
-        sb.AppendLine("agents:");
-        sb.AppendLine("  shogun:");
-        sb.AppendLine("    status: idle");
-        sb.AppendLine("    last_action: null");
-        sb.AppendLine("  karo:");
-        sb.AppendLine("    status: " + karoStatus);
-        sb.AppendLine("    current_subtasks: " + subtaskCount);
-        sb.AppendLine("    last_action: null");
+
+        var status = new MasterStatusYaml
+        {
+            LastUpdated = updated.ToString("yyyy-MM-dd HH:mm"),
+            CurrentTask = currentTask,
+            TaskStatus = taskStatus,
+            TaskDescription = taskDescription,
+            Agents = new Dictionary<string, AgentStatusYaml>()
+        };
+
+        status.Agents["shogun"] = new AgentStatusYaml { Status = "idle", LastAction = null };
+        status.Agents["karo"] = new AgentStatusYaml { Status = taskStatus == "in_progress" ? "busy" : "idle", CurrentSubtasks = assignments?.Count ?? 0, LastAction = null };
+
         var maxAshigaru = GetAshigaruCount();
         for (var i = 1; i <= maxAshigaru; i++)
         {
@@ -302,21 +243,49 @@ public class ShogunQueueService : IShogunQueueService
             var currentTaskId = a != null && taskStatus == "in_progress" ? (a.TaskId ?? "null") : "null";
             var lastCompleted = a != null && taskStatus == "done" ? (a.TaskId ?? "null") : "null";
             var progress = a != null && taskStatus == "done" ? 100 : (a != null ? 0 : 0);
-            sb.AppendLine("  ashigaru" + i + ":");
-            sb.AppendLine("    status: " + ashigaruStatus);
-            sb.AppendLine("    current_task: " + (string.IsNullOrEmpty(currentTaskId) || currentTaskId == "null" ? "null" : EscapeYaml(currentTaskId)));
-            sb.AppendLine("    progress: " + progress);
-            sb.AppendLine("    last_completed: " + (string.IsNullOrEmpty(lastCompleted) || lastCompleted == "null" ? "null" : EscapeYaml(lastCompleted)));
+
+            status.Agents[$"ashigaru{i}"] = new AgentStatusYaml
+            {
+                Status = ashigaruStatus,
+                CurrentTask = currentTaskId == "null" ? null : currentTaskId,
+                Progress = progress,
+                LastCompleted = lastCompleted == "null" ? null : lastCompleted
+            };
         }
-        File.WriteAllText(path, sb.ToString());
+
+        var bytes = YamlSerializer.Serialize(status);
+        File.WriteAllBytes(path, bytes.ToArray());
     }
 
-    private static string EscapeYaml(string s)
+    /// <inheritdoc />
+    public AppSettings GetSettings()
     {
-        if (string.IsNullOrEmpty(s))
-            return "\"\"";
-        if (s.Contains('\n') || s.Contains('"') || s.Contains('#') || s.IndexOfAny(new[] { ':', '[', ']', '{', '}', ',' }) >= 0)
-            return "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
-        return "\"" + s + "\"";
+        return _settingsService.Get();
+    }
+
+    /// <inheritdoc />
+    public string GetDocumentOutputPath(string? projectId = null)
+    {
+        var settings = _settingsService.Get();
+        var root = settings.DocumentRoot;
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            root = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Shogun")
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Shogun");
+        }
+        else
+        {
+            root = Environment.ExpandEnvironmentVariables(root);
+        }
+
+        if (string.IsNullOrEmpty(projectId))
+            return root;
+
+        var project = _projectService.GetProjects().FirstOrDefault(p => p.Id == projectId);
+        if (project == null || string.IsNullOrEmpty(project.Name))
+            return root;
+
+        return Path.Combine(root, project.Name);
     }
 }

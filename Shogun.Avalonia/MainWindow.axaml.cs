@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Shogun.Avalonia.Services;
+using Shogun.Avalonia.Util;
 using Shogun.Avalonia.ViewModels;
 
 namespace Shogun.Avalonia;
@@ -101,6 +102,48 @@ public partial class MainWindow : Window
         if (DataContext is MainWindowViewModel vm && !vm.IsAiProcessing)
         {
             await vm.SendMessageAsync();
+        }
+    }
+
+    private void OnApproveKaroExecution(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string blockId && DataContext is MainWindowViewModel vm)
+        {
+            var block = vm.GetPaneBlockById(blockId);
+            if (block != null)
+            {
+                Logger.Log($"家老の改修を許可しました: {blockId}", LogLevel.Info);
+                block.ApproveExecution();
+            }
+        }
+    }
+
+    private void OnRejectKaroExecution(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string blockId && DataContext is MainWindowViewModel vm)
+        {
+            var block = vm.GetPaneBlockById(blockId);
+            if (block != null)
+            {
+                Logger.Log($"家老の改修を却下しました: {blockId}", LogLevel.Info);
+                block.RejectExecution();
+            }
+        }
+    }
+
+    private void OnAgentPaneScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is ScrollViewer sv && e.ExtentDelta.Length > 0)
+        {
+            sv.ScrollToEnd();
+        }
+    }
+
+    private void OnDashboardScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is ScrollViewer sv && e.ExtentDelta.Length > 0)
+        {
+            sv.ScrollToEnd();
         }
     }
 }

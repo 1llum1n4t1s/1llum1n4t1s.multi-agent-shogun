@@ -91,6 +91,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _karoExecutionPermissionMode = "PromptUser";
 
+    [ObservableProperty]
+    private string _documentRoot = string.Empty;
+
     /// <summary>ViewModel を生成する。</summary>
     /// <param name="settingsService">設定サービス。</param>
     /// <param name="claudeModelsService">models.dev でモデル一覧を取得するサービス。null のときは新規作成。</param>
@@ -102,7 +105,6 @@ public partial class SettingsViewModel : ObservableObject
         _claudeCodeSetupService = claudeCodeSetupService ?? new ClaudeCodeSetupService();
         _onClose = onClose;
         LoadFromService();
-        _ = CheckLoginStatusAsync();
     }
 
     /// <summary>設定サービスから現在の設定を読み込む。パスは環境変数を展開して表示する。モデルは保存値のまま（空のときは空）。</summary>
@@ -121,25 +123,36 @@ public partial class SettingsViewModel : ObservableObject
         ThinkingKaro = s.ThinkingKaro;
         ThinkingAshigaru = s.ThinkingAshigaru;
         KaroExecutionPermissionMode = s.KaroExecutionPermissionMode;
+        DocumentRoot = ExpandPath(s.DocumentRoot);
     }
 
     /// <summary>保存済み ID（ModelShogun/Karo/Ashigaru）から SelectedModel* を同期する。AllModelOptions 設定後に呼ぶ。</summary>
     private void SyncSelectedFromIds()
     {
-        SyncOne(ModelShogun, o => SelectedModelShogun = o);
-        SyncOne(ModelKaro, o => SelectedModelKaro = o);
-        SyncOne(ModelAshigaru, o => SelectedModelAshigaru = o);
+        // ID を一時保存
+        var shogunId = ModelShogun;
+        var karoId = ModelKaro;
+        var ashigaruId = ModelAshigaru;
+
+        SyncOne(shogunId, o => SelectedModelShogun = o);
+        SyncOne(karoId, o => SelectedModelKaro = o);
+        SyncOne(ashigaruId, o => SelectedModelAshigaru = o);
+
+        // SyncOne の副作用で ModelShogun 等が書き換わった可能性があるため戻す
+        ModelShogun = shogunId;
+        ModelKaro = karoId;
+        ModelAshigaru = ashigaruId;
     }
 
     /// <summary>ID に対応する ModelOption を AllModelOptions から探し setSelected で設定する。</summary>
     private void SyncOne(string id, Action<ModelOption?> setSelected)
     {
-        if (ClaudeCodeModelsService.IsInvalidModelId(id))
+        if (string.IsNullOrEmpty(id) || ClaudeCodeModelsService.IsInvalidModelId(id))
         {
             setSelected(null);
             return;
         }
-        var opt = string.IsNullOrEmpty(id) ? null : AllModelOptions.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
+        var opt = AllModelOptions.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase));
         setSelected(opt);
     }
 
@@ -181,53 +194,6 @@ public partial class SettingsViewModel : ObservableObject
         return Environment.ExpandEnvironmentVariables(path);
     }
 
-    /// <summary>Claude Code CLI のログイン状態を確認する。</summary>
-    [ObservableProperty]
-    private bool _isClaudeLoggedIn = false;
-
-    /// <summary>ログイン確認中か。</summary>
-    [ObservableProperty]
-    private bool _isCheckingLogin = false;
-
-    /// <summary>ログイン状態のメッセージ。</summary>
-    [ObservableProperty]
-    private string _loginStatusMessage = "ログイン状態を確認中...";
-
-    /// <summary>Claude Code CLI にログインする。</summary>
-    public async Task LoginClaudeAsync()
-    {
-        var progress = new Progress<string>(msg => LoginStatusMessage = msg);
-        await _claudeCodeSetupService.RunLoginAsync(progress).ConfigureAwait(true);
-        await CheckLoginStatusAsync();
-    }
-
-    /// <summary>ログイン状態を再確認する。</summary>
-    public async Task CheckLoginStatusAsync()
-    {
-        if (IsCheckingLogin) return;
-        IsCheckingLogin = true;
-        LoginStatusMessage = "ログイン状態を確認中...";
-        try
-        {
-            IsClaudeLoggedIn = await _claudeCodeSetupService.IsLoggedInAsync().ConfigureAwait(true);
-            LoginStatusMessage = IsClaudeLoggedIn ? "ログイン済み" : "未ログイン (ログインが必要です)";
-        }
-        catch (Exception ex)
-        {
-            LoginStatusMessage = $"確認エラー: {ex.Message}";
-        }
-        finally
-        {
-            IsCheckingLogin = false;
-        }
-    }
-
-    /// <summary>Claude Code CLI にログインするコマンド。</summary>
-    public IAsyncRelayCommand LoginClaudeCommand => new AsyncRelayCommand(LoginClaudeAsync);
-
-    /// <summary>ログイン状態を再確認するコマンド。</summary>
-    public IAsyncRelayCommand CheckLoginStatusCommand => new AsyncRelayCommand(CheckLoginStatusAsync);
-
     /// <summary>保存してウィンドウを閉じる。</summary>
     [RelayCommand]
     public void SaveAndClose()
@@ -256,7 +222,8 @@ public partial class SettingsViewModel : ObservableObject
             ThinkingAshigaru = ThinkingAshigaru,
             ApiEndpoint = current.ApiEndpoint,
             RepoRoot = current.RepoRoot,
-            KaroExecutionPermissionMode = KaroExecutionPermissionMode
+            KaroExecutionPermissionMode = KaroExecutionPermissionMode,
+            DocumentRoot = DocumentRoot
         });
         _onClose?.Invoke();
     }
@@ -266,11 +233,8 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (ClaudeCodeModelsService.IsInvalidModelId(model))
             return string.Empty;
-        if (!string.IsNullOrWhiteSpace(model))
-            return model;
-        if (AllModelOptions.Count == 0)
-            return string.Empty;
-        return FirstHaikuOrFirst(AllModelOptions)?.Id ?? string.Empty;
+        
+        return model ?? string.Empty;
     }
 
     /// <summary>保存せずにウィンドウを閉じる。</summary>
@@ -289,7 +253,7 @@ public partial class SettingsViewModel : ObservableObject
         foreach (var m in models)
             AllModelOptions.Add(new ModelOption(m.Id, m.Name));
         SortAllModelOptionsByDisplayName();
-        ApplyDefaultModelsIfEmpty();
+        // ApplyDefaultModelsIfEmpty(); // 読み込み時に勝手に補完しないようにコメントアウト
         SyncSelectedFromIds();
     }
 
@@ -310,7 +274,7 @@ public partial class SettingsViewModel : ObservableObject
                     foreach (var m in models)
                         AllModelOptions.Add(new ModelOption(m.Id, m.Name));
                     SortAllModelOptionsByDisplayName();
-                    ApplyDefaultModelsIfEmpty();
+                    // ApplyDefaultModelsIfEmpty(); // 読み込み時に勝手に補完しないようにコメントアウト
                 }
                 SyncSelectedFromIds();
             });

@@ -22,9 +22,10 @@ public partial class SettingsWindow : Window
         if (DataContext is ViewModels.SettingsViewModel vm)
         {
             await vm.LoadModelOptionsAsync().ConfigureAwait(true);
-            vm.ResolveEmptyModelsFromList();
-            vm.UpgradeModelsToLatestInFamily();
-            vm.PersistUpgradedModels();
+            // 起動時に自動でアップグレードして保存してしまうと、ユーザーが選択したモデルが上書きされる可能性があるためコメントアウト
+            // vm.ResolveEmptyModelsFromList();
+            // vm.UpgradeModelsToLatestInFamily();
+            // vm.PersistUpgradedModels();
         }
     }
 
@@ -41,6 +42,11 @@ public partial class SettingsWindow : Window
     private async void OnBrowseLogPath(object? sender, RoutedEventArgs e)
     {
         await PickFolderAndSet(p => (DataContext as ViewModels.SettingsViewModel)!.LogPath = p, "ログ保存先を選択");
+    }
+
+    private async void OnBrowseDocumentRoot(object? sender, RoutedEventArgs e)
+    {
+        await PickFolderAndSet(p => (DataContext as ViewModels.SettingsViewModel)!.DocumentRoot = p, "ドキュメントルートを選択");
     }
 
     /// <summary>フォルダ選択ダイアログを表示し、選択されたパスを指定アクションに渡す。</summary>

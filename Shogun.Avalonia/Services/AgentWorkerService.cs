@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using Shogun.Avalonia.Models;
 using Shogun.Avalonia.Util;
 
 namespace Shogun.Avalonia.Services;
@@ -25,6 +26,7 @@ public class AgentWorkerService : IAgentWorkerService
     private Task? _karoLoop;
     private List<Task>? _ashigaruLoops;
     private bool _started;
+    private ISettingsService? _settingsService;
 
     /// <summary>サービスを生成する。</summary>
     public AgentWorkerService(IClaudeCodeRunService runService, IShogunQueueService queueService, IClaudeCodeProcessHost processHost)
@@ -32,6 +34,12 @@ public class AgentWorkerService : IAgentWorkerService
         _runService = runService;
         _queueService = queueService;
         _processHost = processHost;
+    }
+
+    /// <summary>設定サービスを設定する（確認モード参照用）。</summary>
+    public void SetSettingsService(ISettingsService settingsService)
+    {
+        _settingsService = settingsService;
     }
 
     /// <inheritdoc />
@@ -150,11 +158,51 @@ public class AgentWorkerService : IAgentWorkerService
                     await _ashigaruChannels[n - 1].Writer.WriteAsync(new AshigaruJob { AshigaruIndex = n, Progress = job.AshigaruProgressFor(n), DoneTcs = doneTcs }, ct).ConfigureAwait(false);
                 }
                 await Task.WhenAll(doneTcsList.Select(t => t.Task)).ConfigureAwait(false);
-                var reportOk = await _runService.RunKaroReportAggregationAsync(job.ReportProgress, ct).ConfigureAwait(false);
-                var resultMessage = reportOk
-                    ? $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽{assigned.Count}名・家老（報告集約）の実行が完了しました。"
-                    : $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽の実行は完了しましたが、家老（報告集約）に失敗しました。ダッシュボードで確認してください。";
-                job.ResultTcs.TrySetResult(resultMessage);
+
+                var settings = _settingsService?.Get();
+                var permissionMode = settings?.KaroExecutionPermissionMode ?? "PromptUser";
+                var shouldExecuteKaroPhase3 = false;
+
+                if (permissionMode == "AlwaysAllow")
+                {
+                    shouldExecuteKaroPhase3 = true;
+                }
+                else if (permissionMode == "AlwaysReject")
+                {
+                    shouldExecuteKaroPhase3 = false;
+                }
+                else if (permissionMode == "PromptUser")
+                {
+                    var approvalBlock = new PaneBlock
+                    {
+                        Content = "足軽の報告書をもとに、コード改修を実行しますか？",
+                        Status = "* ユーザー確認待ち",
+                        Timestamp = DateTime.Now
+                    };
+                    karoJob.ApprovalBlock = approvalBlock;
+                    job.KaroProgress.Report($"[確認待機]");
+
+                    var approved = await approvalBlock.RequestApprovalAsync().ConfigureAwait(false);
+                    shouldExecuteKaroPhase3 = approved;
+                }
+
+                if (shouldExecuteKaroPhase3)
+                {
+                    var karoExecOk = await _runService.RunKaroExecutionAsync(job.KaroProgress, ct).ConfigureAwait(false);
+                    var reportOk = await _runService.RunKaroReportAggregationAsync(job.ReportProgress, ct).ConfigureAwait(false);
+                    var resultMessage = (karoExecOk && reportOk)
+                        ? $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽{assigned.Count}名・家老（改修）・家老（報告集約）の実行が完了しました。"
+                        : $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽の実行は完了しましたが、家老（改修・報告集約）に失敗しました。ダッシュボードで確認してください。";
+                    job.ResultTcs.TrySetResult(resultMessage);
+                }
+                else
+                {
+                    var reportOk = await _runService.RunKaroReportAggregationAsync(job.ReportProgress, ct).ConfigureAwait(false);
+                    var resultMessage = reportOk
+                        ? $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽{assigned.Count}名・家老（報告集約）の実行が完了しました。（コード改修は却下されました）"
+                        : $"指示をキューに追加しました（{karoJob.CommandId}）。家老・足軽の実行は完了しましたが、家老（報告集約）に失敗しました。ダッシュボードで確認してください。";
+                    job.ResultTcs.TrySetResult(resultMessage);
+                }
             }
             catch (Exception ex)
             {
@@ -199,6 +247,7 @@ public class AgentWorkerService : IAgentWorkerService
     {
         internal AgentJob Job { get; set; } = null!;
         internal string CommandId { get; set; } = "";
+        internal PaneBlock? ApprovalBlock { get; set; }
     }
 
     private sealed class AshigaruJob
@@ -211,6 +260,11 @@ public class AgentWorkerService : IAgentWorkerService
     /// <inheritdoc />
     public void StopAll()
     {
+        try
+        {
+            _workerCts?.Cancel();
+        }
+        catch { /* キャンセルは失敗しても続行 */ }
         _processHost.StopAll();
     }
 }

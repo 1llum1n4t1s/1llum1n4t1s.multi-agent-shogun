@@ -52,4 +52,11 @@ public interface IShogunQueueService
     /// <param name="taskDescription">指示内容（任意）。</param>
     /// <param name="assignments">完了時の割り当て一覧（進行中・完了時にどの足軽が使われたか）。</param>
     void WriteMasterStatus(DateTime updated, string? currentTask, string taskStatus, string? taskDescription, IReadOnlyList<TaskAssignmentItem>? assignments);
+
+    /// <summary>現在の設定を取得する。</summary>
+    AppSettings GetSettings();
+
+    /// <summary>現在のプロジェクトに基づいたドキュメント出力先パスを取得する。</summary>
+    /// <param name="projectId">プロジェクト ID（任意）。</param>
+    string GetDocumentOutputPath(string? projectId = null);
 }

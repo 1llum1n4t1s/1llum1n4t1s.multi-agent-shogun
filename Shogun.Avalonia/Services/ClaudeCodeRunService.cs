@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Shogun.Avalonia.Models;
 using Shogun.Avalonia.Util;
+using VYaml.Serialization;
 
 namespace Shogun.Avalonia.Services;
 
@@ -13,23 +16,24 @@ namespace Shogun.Avalonia.Services;
 /// </summary>
 public class ClaudeCodeRunService : IClaudeCodeRunService
 {
-    private const string KaroUserPrompt = @"queue/shogun_to_karo.yaml に新しい指示がある。確認して、以下のJSON形式で足軽タスク情報を出力せよ。
+    private const string KaroUserPrompt = @"queue/shogun_to_karo.yaml に新しい指示がある。確認して、以下のYAML形式で足軽タスク情報を出力せよ。
 
-```json
-{
-  ""tasks"": [
-    {
-      ""ashigaru_id"": 1,
-      ""description"": ""タスクの説明"",
-      ""target_path"": ""対象ファイルパス（オプション）""
-    }
-  ]
-}
+重要: あなたの現在の作業ディレクトリ（CWD）はプロジェクトのルートディレクトリである。
+queue/shogun_to_karo.yaml は、カレントディレクトリからの相対パスでアクセスせよ。
+
+```yaml
+tasks:
+  - ashigaru_id: 1
+    description: ""タスクの説明""
+    target_path: ""対象ファイルパス（オプション）""
 ```
 
-注意: 複数の独立したタスクなら複数足軽に分散して並列実行させよ。JSONのみ出力し、余計な説明は不要。";
+注意: 複数の独立したタスクなら複数足軽に分散して並列実行させよ。YAMLのみ出力し、余計な説明は不要。";
     
     private const string KaroExecutionPrompt = @"足軽からの報告書をすべて読んだ。確認せよ: queue/reports/ashigaru*_report.yaml
+
+重要: あなたの現在の作業ディレクトリ（CWD）はプロジェクトのルートディレクトリである。
+queue/reports/ は、カレントディレクトリからの相対パスでアクセスせよ。
 
 報告内容をまとめ、必要に応じて自分でコードを改修せよ。
 1. 報告ファイルをすべて読む
@@ -48,7 +52,10 @@ result: ""成功/失敗""
 summary: ""処理サマリー""
 ---";
     
-    private const string KaroReportUserPrompt = "queue/reports/ の報告を確認し、dashboard.md の「戦果」を更新せよ。";
+    private const string KaroReportUserPrompt = @"queue/reports/ の報告を確認し、dashboard.md の「戦果」を更新せよ。
+
+重要: あなたの現在の作業ディレクトリ（CWD）はプロジェクトのルートディレクトリである。
+queue/reports/ および dashboard.md は、カレントディレクトリからの相対パスでアクセスせよ。";
 
     private readonly IClaudeCodeProcessHost _processHost;
     private readonly IClaudeCodeSetupService _setupService;
@@ -95,7 +102,10 @@ summary: ""処理サマリー""
             return false;
         }
         var ashigaruInstructions = _instructionsLoader.LoadAshigaruInstructions() ?? string.Empty;
-        var userPrompt = $"queue/tasks/ashigaru{ashigaruIndex}.yaml に任務がある。確認して実行せよ。";
+        var userPrompt = $@"queue/tasks/ashigaru{ashigaruIndex}.yaml に任務がある。確認して実行せよ。
+
+重要: あなたの現在の作業ディレクトリ（CWD）はプロジェクトのルートディレクトリである。
+queue/tasks/ashigaru{ashigaruIndex}.yaml は、カレントディレクトリからの相対パスでアクセスせよ。";
         var result = await RunClaudeAsync(userPrompt, ashigaruInstructions, progress, $"足軽{ashigaruIndex}", cancellationToken).ConfigureAwait(false);
         return result.Success;
     }
@@ -131,15 +141,36 @@ summary: ""処理サマリー""
             progress?.Report("ワークスペースルートが設定されていません。設定で指定してください。");
             return (false, string.Empty);
         }
+
+        var settings = _queueService.GetSettings();
+        string? modelId = null;
+        bool thinking = false;
+
+        if (roleLabel == "将軍")
+        {
+            modelId = settings.ModelShogun;
+            thinking = settings.ThinkingShogun;
+        }
+        else if (roleLabel.StartsWith("家老"))
+        {
+            modelId = settings.ModelKaro;
+            thinking = settings.ThinkingKaro;
+        }
+        else if (roleLabel.StartsWith("足軽"))
+        {
+            modelId = settings.ModelAshigaru;
+            thinking = settings.ThinkingAshigaru;
+        }
+
         string? promptFile = null;
         try
         {
             progress?.Report($"{roleLabel}（常駐プロセス）にジョブを送信中…");
-            Logger.Log($"{roleLabel} のジョブを送信します。UserPrompt='{userPrompt}'", LogLevel.Info);
+            Logger.Log($"{roleLabel} のジョブを送信します。UserPrompt='{userPrompt}', Model='{modelId}', Thinking={thinking}", LogLevel.Info);
             promptFile = Path.Combine(Path.GetTempPath(), "shogun-prompt-" + Guid.NewGuid().ToString("N")[..8] + ".md");
             await File.WriteAllTextAsync(promptFile, systemPromptContent, cancellationToken).ConfigureAwait(false);
             Logger.Log($"システムプロンプトファイルを生成しました: {promptFile}", LogLevel.Debug);
-            var (success, outputStr) = await _processHost.RunJobAsync(roleLabel, userPrompt, promptFile, progress, cancellationToken).ConfigureAwait(false);
+            var (success, outputStr) = await _processHost.RunJobAsync(roleLabel, userPrompt, promptFile, modelId, thinking, progress, cancellationToken).ConfigureAwait(false);
             Logger.Log($"{roleLabel} のジョブが完了しました。Success={success}", LogLevel.Info);
             if (!success)
                 progress?.Report($"{roleLabel}の実行が失敗しました。");
@@ -161,36 +192,82 @@ summary: ""処理サマリー""
         }
     }
 
-    /// <summary>家老の JSON 出力から足軽タスクを生成する。</summary>
-    private async Task GenerateAshigaruTasksFromKaroOutputAsync(string karoJson, CancellationToken cancellationToken)
+    /// <summary>家老の YAML 出力から足軽タスクを生成する。</summary>
+    private async Task GenerateAshigaruTasksFromKaroOutputAsync(string karoYaml, CancellationToken cancellationToken)
     {
         try
         {
             var repoRoot = _queueService.GetRepoRoot();
             
-            // markdown コードブロック（```json ... ```）を除去
-            var jsonText = karoJson;
-            if (jsonText.StartsWith("```json", StringComparison.Ordinal))
-                jsonText = jsonText.Substring(7);
-            if (jsonText.StartsWith("```", StringComparison.Ordinal))
-                jsonText = jsonText.Substring(3);
-            if (jsonText.EndsWith("```", StringComparison.Ordinal))
-                jsonText = jsonText.Substring(0, jsonText.Length - 3);
-            jsonText = jsonText.Trim();
-            
-            var json = System.Text.Json.JsonDocument.Parse(jsonText);
-            var root = json.RootElement;
-            if (!root.TryGetProperty("tasks", out var tasksElement) || tasksElement.ValueKind != System.Text.Json.JsonValueKind.Array)
-                return;
-            
-            foreach (var taskElem in tasksElement.EnumerateArray())
+            // markdown コードブロック（```yaml ... ```）を抽出
+            var yamlText = string.Empty;
+            if (karoYaml.Contains("```yaml"))
             {
-                if (!taskElem.TryGetProperty("ashigaru_id", out var idElem))
-                    continue;
-                var ashigaruId = idElem.GetInt32();
-                var description = taskElem.TryGetProperty("description", out var descElem) ? descElem.GetString() ?? "" : "";
-                var targetPath = taskElem.TryGetProperty("target_path", out var pathElem) ? pathElem.GetString() ?? "" : "";
-                var yaml = $"""
+                var start = karoYaml.IndexOf("```yaml", StringComparison.Ordinal) + 7;
+                var end = karoYaml.IndexOf("```", start, StringComparison.Ordinal);
+                if (end > start) yamlText = karoYaml.Substring(start, end - start);
+            }
+            else if (karoYaml.Contains("```"))
+            {
+                var start = karoYaml.IndexOf("```", StringComparison.Ordinal) + 3;
+                var end = karoYaml.IndexOf("```", start, StringComparison.Ordinal);
+                if (end > start) yamlText = karoYaml.Substring(start, end - start);
+            }
+            
+            // コードブロックが見つからない場合は、全体が YAML であると期待してパースを試みるが、
+            // その前に YAML らしい開始部分を探す（VYaml の MappingStart エラー対策）
+            if (string.IsNullOrWhiteSpace(yamlText))
+            {
+                var lines = karoYaml.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                var yamlLines = new List<string>();
+                bool foundStart = false;
+                foreach (var line in lines)
+                {
+                    if (!foundStart && (line.TrimStart().StartsWith("tasks:", StringComparison.OrdinalIgnoreCase) || line.TrimStart().StartsWith("---")))
+                    {
+                        foundStart = true;
+                    }
+                    if (foundStart)
+                    {
+                        yamlLines.Add(line);
+                    }
+                }
+                if (yamlLines.Count > 0)
+                {
+                    yamlText = string.Join("\n", yamlLines);
+                }
+                else
+                {
+                    yamlText = karoYaml.Trim();
+                }
+            }
+            else
+            {
+                yamlText = yamlText.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(yamlText))
+            {
+                Logger.Log("家老の出力から YAML コンテンツを抽出できませんでした。", LogLevel.Warning);
+                return;
+            }
+            
+            try
+            {
+                var bytes = Encoding.UTF8.GetBytes(yamlText);
+                var wrapper = YamlSerializer.Deserialize<TaskAssignmentYaml>(bytes);
+                if (wrapper?.Assignments == null || wrapper.Assignments.Count == 0)
+                {
+                    Logger.Log("家老の YAML 出力にタスク割り当てが含まれていません。", LogLevel.Debug);
+                    return;
+                }
+                
+                foreach (var task in wrapper.Assignments)
+                {
+                    var ashigaruId = task.Ashigaru;
+                    var description = task.Description ?? "";
+                    var targetPath = task.TargetPath ?? "";
+                    var yaml = $"""
 task:
   task_id: task_{ashigaruId}_{DateTime.Now:HHmmss}
   description: "{description}"
@@ -198,14 +275,26 @@ task:
   status: assigned
   timestamp: "{DateTime.UtcNow:O}"
 """;
-                var taskFilePath = Path.Combine(repoRoot, "queue", "tasks", $"ashigaru{ashigaruId}.yaml");
-                await File.WriteAllTextAsync(taskFilePath, yaml, cancellationToken).ConfigureAwait(false);
-                Logger.Log($"足軽{ashigaruId}タスクファイルを生成しました: {taskFilePath}", LogLevel.Debug);
+                    var taskFilePath = Path.Combine(repoRoot, "queue", "tasks", $"ashigaru{ashigaruId}.yaml");
+                    var taskDir = Path.GetDirectoryName(taskFilePath);
+                    if (!string.IsNullOrEmpty(taskDir))
+                    {
+                        Directory.CreateDirectory(taskDir);
+                    }
+                    await File.WriteAllTextAsync(taskFilePath, yaml, cancellationToken).ConfigureAwait(false);
+                    Logger.Log($"足軽{ashigaruId}タスクファイルを生成しました: {taskFilePath}", LogLevel.Debug);
+                }
+            }
+            catch (Exception parseEx)
+            {
+                Logger.Log($"家老の出力が YAML 形式ではありません（エラーメッセージ等の可能性）: {parseEx.GetType().Name}", LogLevel.Info);
+                return;
             }
         }
         catch (Exception ex)
         {
             Logger.Log($"足軽タスク生成エラー: {ex.Message}", LogLevel.Warning);
+            Logger.Log($"解析対象 YAML 文字列:\n{karoYaml}", LogLevel.Debug);
         }
     }
 }

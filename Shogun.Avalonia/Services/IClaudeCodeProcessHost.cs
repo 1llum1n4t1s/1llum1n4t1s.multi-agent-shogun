@@ -19,6 +19,8 @@ public interface IClaudeCodeProcessHost
     /// <param name="roleLabel">将軍 / 家老 / 足軽N 等。</param>
     /// <param name="userPrompt">ユーザープロンプト。</param>
     /// <param name="systemPromptPath">システムプロンプトファイルのパス。</param>
+    /// <param name="modelId">使用するモデルID（オプション）。</param>
+    /// <param name="thinking">Thinking モードを使うか（オプション）。</param>
     /// <param name="progress">進捗（任意）。</param>
     /// <param name="cancellationToken">キャンセルトークン。</param>
     /// <returns>成功と出力文字列。</returns>
@@ -26,7 +28,9 @@ public interface IClaudeCodeProcessHost
         string roleLabel,
         string userPrompt,
         string systemPromptPath,
-        IProgress<string>? progress,
+        string? modelId = null,
+        bool thinking = false,
+        IProgress<string>? progress = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>全常駐プロセスを終了する。アプリ終了時に呼ぶ。</summary>

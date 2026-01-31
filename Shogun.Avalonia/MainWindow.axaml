@@ -1,18 +1,21 @@
 <Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:actipro="http://schemas.actiprosoftware.com/avaloniaui"
-        xmlns:vm="clr-namespace:Shogun.Avalonia.ViewModels"
-        xmlns:models="clr-namespace:Shogun.Avalonia.Models"
-        xmlns:local="clr-namespace:Shogun.Avalonia"
-        mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="900"
-        x:Class="Shogun.Avalonia.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
-        Title="Shogun.Avalonia - AI Command Center"
-        Width="1400" Height="900"
-        WindowStartupLocation="CenterScreen">
+       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+       xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+       xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+       xmlns:actipro="http://schemas.actiprosoftware.com/avaloniaui"
+       xmlns:vm="clr-namespace:Shogun.Avalonia.ViewModels"
+       xmlns:models="clr-namespace:Shogun.Avalonia.Models"
+       xmlns:local="clr-namespace:Shogun.Avalonia"
+       xmlns:converters="clr-namespace:Shogun.Avalonia.Converters"
+       mc:Ignorable="d" d:DesignWidth="1400" d:DesignHeight="900"
+       x:Class="Shogun.Avalonia.MainWindow"
+       x:DataType="vm:MainWindowViewModel"
+       Title="Shogun.Avalonia - AI Command Center"
+       Width="1400" Height="900"
+       WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <converters:CenterPaneVisibilityConverter x:Key="CenterPaneVisibilityConverter"/>
+        <converters:RightPaneVisibilityConverter x:Key="RightPaneVisibilityConverter"/>
         <DataTemplate x:Key="AgentPaneTemplate" x:DataType="vm:AgentPaneViewModel">
             <Border BorderThickness="1"
                     BorderBrush="{actipro:ThemeResource Container2BorderBrush}"
@@ -29,14 +32,22 @@
                             BorderThickness="0,0,0,1"
                             BorderBrush="{actipro:ThemeResource Container2BorderBrush}">
                         <Grid ColumnDefinitions="*,Auto">
-                            <TextBlock Grid.Column="0" 
-                                       Text="{Binding DisplayName}"
-                                       FontWeight="Bold"
-                                       FontSize="12"/>
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding DisplayName}"
+                                           FontWeight="Bold"
+                                           FontSize="12"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding ModelInfo}"
+                                           FontSize="10"
+                                           Foreground="{actipro:ThemeResource DefaultForegroundBrushSecondary}"
+                                           VerticalAlignment="Center"
+                                           Opacity="0.8"/>
+                            </StackPanel>
                             <TextBlock Grid.Column="1" 
                                        Text="[active]"
                                        Foreground="{actipro:ThemeResource DefaultForegroundBrushSecondary}"
                                        FontSize="10"
+                                       VerticalAlignment="Center"
                                        Opacity="0.6"/>
                         </Grid>
                     </Border>
@@ -45,7 +56,8 @@
                     <ScrollViewer Grid.Row="1"
                                   Padding="0"
                                   VerticalScrollBarVisibility="Auto"
-                                  HorizontalScrollBarVisibility="Disabled">
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  ScrollChanged="OnAgentPaneScrollChanged">
                         <ItemsControl ItemsSource="{Binding Blocks}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="models:PaneBlock">
@@ -62,15 +74,28 @@
                                                        Opacity="0.8"/>
                                             
                                             <!-- 本文 -->
-                                            <Grid ColumnDefinitions="Auto,*">
-                                                <TextBlock Grid.Column="0" Text="> " FontWeight="Bold" Margin="0,0,4,0" VerticalAlignment="Top"/>
-                                                <TextBlock Grid.Column="1" 
-                                                           Text="{Binding Content}"
-                                                           TextWrapping="Wrap"
-                                                           FontSize="12"
-                                                           LineHeight="18"/>
-                                            </Grid>
-                                            
+                                            <TextBlock Text="{Binding Content}"
+                                                       TextWrapping="Wrap"
+                                                       FontSize="12"
+                                                       LineHeight="18"/>
+
+                                            <!-- 確認ボタン（家老のコード改修確認用） -->
+                                            <StackPanel Spacing="6" Margin="0,8,0,0" IsVisible="{Binding ShowApprovalButtons}">
+                                                <TextBlock Text="コード改修を実行しますか？"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"/>
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <Button Content="許可" 
+                                                            Padding="12,6"
+                                                            Click="OnApproveKaroExecution"
+                                                            Tag="{Binding BlockId}"/>
+                                                    <Button Content="却下" 
+                                                            Padding="12,6"
+                                                            Click="OnRejectKaroExecution"
+                                                            Tag="{Binding BlockId}"/>
+                                                </StackPanel>
+                                            </StackPanel>
+
                                             <!-- タイムスタンプ -->
                                             <TextBlock Text="{Binding Timestamp, StringFormat='{}{0:HH:mm:ss}'}" 
                                                        HorizontalAlignment="Right"
@@ -104,8 +129,8 @@
                         </TextBlock.Text>
                     </TextBlock>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-                        <Button Content="プロジェクト設定" Click="OnProjectSettingsClick"/>
-                        <Button Content="設定" Click="OnSettingsClick"/>
+                        <Button Content="プロジェクト設定" Click="OnProjectSettingsClick" Padding="12,4"/>
+                        <Button Content="設定" Click="OnSettingsClick" Padding="12,4"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -128,28 +153,36 @@
                                     <ContentControl Grid.Row="2" Content="{Binding LeftPane1}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
                                 </Grid>
                             </Border>
-                            <!-- 足軽 1-4 -->
+                            <!-- 足軽 1-N/2 -->
                             <Border Grid.Column="1" Grid.Row="0" BorderThickness="2" BorderBrush="{actipro:ThemeResource Container2BorderBrush}" Background="{actipro:ThemeResource Container1BackgroundBrush}" CornerRadius="4" Padding="8" Margin="2,0">
                                 <Grid RowDefinitions="*,Auto,*,Auto,*,Auto,*">
-                                    <ContentControl Grid.Row="0" Content="{Binding CenterPane0}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="0" Content="{Binding CenterPane0}" ContentTemplate="{StaticResource AgentPaneTemplate}" 
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource CenterPaneVisibilityConverter}, ConverterParameter=0}"/>
                                     <GridSplitter Grid.Row="1" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="2" Content="{Binding CenterPane1}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="2" Content="{Binding CenterPane1}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource CenterPaneVisibilityConverter}, ConverterParameter=1}"/>
                                     <GridSplitter Grid.Row="3" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="4" Content="{Binding CenterPane2}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="4" Content="{Binding CenterPane2}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource CenterPaneVisibilityConverter}, ConverterParameter=2}"/>
                                     <GridSplitter Grid.Row="5" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="6" Content="{Binding CenterPane3}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="6" Content="{Binding CenterPane3}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource CenterPaneVisibilityConverter}, ConverterParameter=3}"/>
                                 </Grid>
                             </Border>
-                            <!-- 足軽 5-8 -->
+                            <!-- 足軽 N/2+1～N -->
                             <Border Grid.Column="2" Grid.Row="0" BorderThickness="2" BorderBrush="{actipro:ThemeResource Container2BorderBrush}" Background="{actipro:ThemeResource Container1BackgroundBrush}" CornerRadius="4" Padding="8" Margin="2,0,0,0">
                                 <Grid RowDefinitions="*,Auto,*,Auto,*,Auto,*">
-                                    <ContentControl Grid.Row="0" Content="{Binding RightPane0}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="0" Content="{Binding RightPane0}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource RightPaneVisibilityConverter}, ConverterParameter=0}"/>
                                     <GridSplitter Grid.Row="1" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="2" Content="{Binding RightPane1}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="2" Content="{Binding RightPane1}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource RightPaneVisibilityConverter}, ConverterParameter=1}"/>
                                     <GridSplitter Grid.Row="3" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="4" Content="{Binding RightPane2}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="4" Content="{Binding RightPane2}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource RightPaneVisibilityConverter}, ConverterParameter=2}"/>
                                     <GridSplitter Grid.Row="5" Height="2" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="0,2"/>
-                                    <ContentControl Grid.Row="6" Content="{Binding RightPane3}" ContentTemplate="{StaticResource AgentPaneTemplate}"/>
+                                    <ContentControl Grid.Row="6" Content="{Binding RightPane3}" ContentTemplate="{StaticResource AgentPaneTemplate}"
+                                                    IsVisible="{Binding TotalAshigaru, Converter={StaticResource RightPaneVisibilityConverter}, ConverterParameter=3}"/>
                                 </Grid>
                             </Border>
                         </Grid>
@@ -158,32 +191,46 @@
                     <TabItem Header="ダッシュボード">
                         <Grid RowDefinitions="Auto,*" Margin="8">
                             <Button Grid.Row="0" Content="更新" Command="{Binding RefreshDashboardCommand}" HorizontalAlignment="Left" Margin="0,0,0,8"/>
-                            <TextBox Grid.Row="1" Text="{Binding DashboardContent}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Cascadia Code, Consolas, Monospace" FontSize="12"/>
+                            <ScrollViewer Grid.Row="1" ScrollChanged="OnDashboardScrollChanged">
+                                <TextBox Text="{Binding DashboardContent}" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" FontFamily="Cascadia Code, Consolas, Monospace" FontSize="12" BorderThickness="0"/>
+                            </ScrollViewer>
                         </Grid>
                     </TabItem>
                 </TabControl>
 
                 <!-- 下部：プロジェクト選択＋メッセージ入力エリア -->
                 <GridSplitter Grid.Row="1" Height="4" Background="{actipro:ThemeResource Container2BorderBrush}" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="0,-2,0,0"/>
-                <Border Grid.Row="1"
-                        Padding="8"
-                        BorderThickness="0,1,0,0"
-                        BorderBrush="{actipro:ThemeResource Container2BorderBrush}">
-                    <Grid RowDefinitions="Auto,*" ColumnDefinitions="*">
-                        <!-- プロジェクト選択 -->
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                            <TextBlock Text="プロジェクト:" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"/>
-                            <ComboBox ItemsSource="{Binding Projects}"
-                                      SelectedItem="{Binding SelectedProject}"
-                                      MinWidth="280"
-                                      HorizontalAlignment="Left">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Name}"/>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                        </StackPanel>
+                        <Border Grid.Row="1"
+                                Padding="8"
+                                BorderThickness="0,1,0,0"
+                                BorderBrush="{actipro:ThemeResource Container2BorderBrush}">
+                            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*">
+                                <!-- プロジェクト選択 & 家老権限 -->
+                                <Grid Grid.Row="0" ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" Margin="0,0,0,8">
+                                    <TextBlock Grid.Column="0" Text="プロジェクト:" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold" Margin="0,0,8,0"/>
+                                    <ComboBox Grid.Column="1" ItemsSource="{Binding Projects}"
+                                              SelectedItem="{Binding SelectedProject}"
+                                              MinWidth="300"
+                                              HorizontalAlignment="Left">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    
+                                    <TextBlock Grid.Column="3" Text="家老の権限:" VerticalAlignment="Center" FontSize="12" Foreground="Gray" Margin="16,0,8,0"/>
+                                    <ComboBox Grid.Column="4" ItemsSource="{Binding KaroPermissionModeOptions}" 
+                                              SelectedItem="{Binding KaroExecutionPermissionMode}" 
+                                              MinWidth="140" 
+                                              FontSize="12"/>
+                                    <TextBlock Grid.Column="5" Text="※ AlwaysAllow: 自動実行 / AlwaysReject: 分析のみ / PromptUser: 確認" 
+                                               VerticalAlignment="Center" 
+                                               FontSize="11" 
+                                               Foreground="Gray" 
+                                               Opacity="0.7"
+                                               Margin="8,0,0,0"/>
+                                </Grid>
                         <!-- テキスト入力＋送信ボタン -->
                         <Grid Grid.Row="1" ColumnDefinitions="*,Auto" RowDefinitions="*">
                             <TextBox Grid.Column="0"
@@ -196,19 +243,19 @@
                                      Padding="8,8"
                                      KeyDown="OnChatInputKeyDown"
                                      FontSize="13"/>
-                            <Button Grid.Column="1"
-                                    Content="送信"
-                                    Click="OnSendButtonClick"
-                                    IsEnabled="{Binding !IsAiProcessing}"
-                                    Margin="8,0,0,0"
-                                    MinWidth="70"
-                                    VerticalAlignment="Bottom"
-                                    Padding="12,8"
-                                    FontSize="13"
-                                    FontWeight="SemiBold"/>
-                        </Grid>
-                    </Grid>
-                </Border>
+                                    <Button Grid.Column="1"
+                                            Content="送信"
+                                            Click="OnSendButtonClick"
+                                            IsEnabled="{Binding !IsAiProcessing}"
+                                            Margin="8,0,0,0"
+                                            MinWidth="70"
+                                            VerticalAlignment="Bottom"
+                                            Padding="12,8"
+                                            FontSize="13"
+                                            FontWeight="SemiBold"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
             </Grid>
         </Grid>
 

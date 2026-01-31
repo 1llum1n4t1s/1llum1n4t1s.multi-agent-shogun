@@ -1,10 +1,13 @@
+using VYaml.Annotations;
+
 namespace Shogun.Avalonia.Models;
 
 /// <summary>
 /// アプリケーション設定モデル。
 /// skill.*, screenshot.*, logging.* は config/settings.yaml。足軽人数・役割別モデルはアプリで編集可能。
 /// </summary>
-public class AppSettings
+[YamlObject]
+public partial class AppSettings
 {
     /// <summary>足軽の人数（1～20）。将軍・家老以外の実働エージェント数。</summary>
     public int AshigaruCount { get; set; } = 8;
@@ -53,4 +56,7 @@ public class AppSettings
 
     /// <summary>ワークスペースルート（queue/dashboard/instructions の親フォルダ）。空のときは config の親を使用。</summary>
     public string RepoRoot { get; set; } = string.Empty;
+
+    /// <summary>ドキュメント出力先ルート（報告書等の作成先）。</summary>
+    public string DocumentRoot { get; set; } = string.Empty;
 }

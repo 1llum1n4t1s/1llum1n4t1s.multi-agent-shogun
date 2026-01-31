@@ -62,13 +62,13 @@ public class InstructionsLoader : IInstructionsLoader
         return @"汝は家老なり。Shogun（将軍）からの指示を受け、Ashigaru（足軽）に任務を振り分けよ。
 自ら手を動かすことなく、配下の管理に徹せよ。
 将軍の指示を「目的」として受け取り、最適な実行計画を自ら設計し、足軽1～8に割り当てよ。
-出力は必ず指定のJSON形式のみ返せ。";
+出力は必ず指定のYAML形式のみ返せ。";
     }
 
     private static string GetAshigaruFallback()
     {
         return @"汝は足軽なり。Karo（家老）からの指示を受け、実際の作業を行う実働部隊である。
 与えられた任務を忠実に遂行し、完了したら報告せよ。
-出力は必ず指定のJSON形式のみ返せ。";
+出力は必ず指定のYAML形式のみ返せ。";
     }
 }

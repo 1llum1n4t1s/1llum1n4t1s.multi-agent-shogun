@@ -40,19 +40,60 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>各エージェントのペイン（将軍・家老・足軽1～8）。多カラム表示用。</summary>
     public ObservableCollection<AgentPaneViewModel> AgentPanes { get; } = new();
 
+    private void UpdateAgentPaneModelInfos()
+    {
+        if (AgentPanes.Count < 2) return;
+        AgentPanes[0].ModelInfo = ModelInfoShogun;
+        AgentPanes[1].ModelInfo = ModelInfoKaro;
+        for (int i = 2; i < AgentPanes.Count; i++)
+        {
+            AgentPanes[i].ModelInfo = ModelInfoAshigaru;
+        }
+    }
+
     /// <summary>左ペイン用（将軍・家老）。</summary>
     public AgentPaneViewModel? LeftPane0 => AgentPanes.Count > 0 ? AgentPanes[0] : null;
     public AgentPaneViewModel? LeftPane1 => AgentPanes.Count > 1 ? AgentPanes[1] : null;
-    /// <summary>中央ペイン用（足軽1～4）。</summary>
+
+    /// <summary>中央ペイン用（足軽1～N/2）。</summary>
     public AgentPaneViewModel? CenterPane0 => AgentPanes.Count > 2 ? AgentPanes[2] : null;
     public AgentPaneViewModel? CenterPane1 => AgentPanes.Count > 3 ? AgentPanes[3] : null;
     public AgentPaneViewModel? CenterPane2 => AgentPanes.Count > 4 ? AgentPanes[4] : null;
     public AgentPaneViewModel? CenterPane3 => AgentPanes.Count > 5 ? AgentPanes[5] : null;
-    /// <summary>右ペイン用（足軽5～8）。</summary>
-    public AgentPaneViewModel? RightPane0 => AgentPanes.Count > 6 ? AgentPanes[6] : null;
-    public AgentPaneViewModel? RightPane1 => AgentPanes.Count > 7 ? AgentPanes[7] : null;
-    public AgentPaneViewModel? RightPane2 => AgentPanes.Count > 8 ? AgentPanes[8] : null;
-    public AgentPaneViewModel? RightPane3 => AgentPanes.Count > 9 ? AgentPanes[9] : null;
+
+    /// <summary>右ペイン用（足軽N/2+1～N）。</summary>
+    public AgentPaneViewModel? RightPane0
+    {
+        get
+        {
+            var rightStart = 2 + (TotalAshigaru + 1) / 2;
+            return AgentPanes.Count > rightStart ? AgentPanes[rightStart] : null;
+        }
+    }
+    public AgentPaneViewModel? RightPane1
+    {
+        get
+        {
+            var rightStart = 2 + (TotalAshigaru + 1) / 2;
+            return AgentPanes.Count > rightStart + 1 ? AgentPanes[rightStart + 1] : null;
+        }
+    }
+    public AgentPaneViewModel? RightPane2
+    {
+        get
+        {
+            var rightStart = 2 + (TotalAshigaru + 1) / 2;
+            return AgentPanes.Count > rightStart + 2 ? AgentPanes[rightStart + 2] : null;
+        }
+    }
+    public AgentPaneViewModel? RightPane3
+    {
+        get
+        {
+            var rightStart = 2 + (TotalAshigaru + 1) / 2;
+            return AgentPanes.Count > rightStart + 3 ? AgentPanes[rightStart + 3] : null;
+        }
+    }
 
     private void NotifyPanePropertiesChanged()
     {
@@ -112,6 +153,29 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty]
     private string _dashboardContent = string.Empty;
 
+    /// <summary>足軽の総人数。ペイン配置の計算に使用。</summary>
+    [ObservableProperty]
+    private int _totalAshigaru = 8;
+
+    /// <summary>家老のコード改修権限モード（AlwaysAllow / AlwaysReject / PromptUser）。メイン画面から切り替え可能。</summary>
+    [ObservableProperty]
+    private string _karoExecutionPermissionMode = "PromptUser";
+
+    /// <summary>家老権限モードの選択肢。XAML バインディング用。</summary>
+    public IReadOnlyList<string> KaroPermissionModeOptions { get; } = new[] { "AlwaysAllow", "AlwaysReject", "PromptUser" };
+
+    /// <summary>実行中のモデル情報（将軍）。</summary>
+    [ObservableProperty]
+    private string _modelInfoShogun = string.Empty;
+
+    /// <summary>実行中のモデル情報（家老）。</summary>
+    [ObservableProperty]
+    private string _modelInfoKaro = string.Empty;
+
+    /// <summary>実行中のモデル情報（足軽）。</summary>
+    [ObservableProperty]
+    private string _modelInfoAshigaru = string.Empty;
+
     /// <summary>起動準備中（Node.js / Claude Code の確認・インストール）か。</summary>
     [ObservableProperty]
     private bool _isLoading = true;
@@ -125,17 +189,36 @@ public partial class MainWindowViewModel : ObservableObject
         _projectService = projectService ?? new ProjectService();
         _settingsService = settingsService ?? new SettingsService();
         _claudeCodeSetupService = claudeCodeSetupService ?? new ClaudeCodeSetupService();
-        _queueService = queueService ?? new ShogunQueueService(_settingsService);
+        _queueService = queueService ?? new ShogunQueueService(_settingsService, _projectService);
         var instructionsLoader = new InstructionsLoader(_queueService);
         var processHost = new ClaudeCodeProcessHost(_claudeCodeSetupService, _queueService);
         _claudeCodeRunService = claudeCodeRunService ?? new ClaudeCodeRunService(processHost, _claudeCodeSetupService, _queueService, instructionsLoader);
         _agentWorkerService = agentWorkerService ?? new AgentWorkerService(_claudeCodeRunService, _queueService, processHost);
+        if (_agentWorkerService is AgentWorkerService aws)
+            aws.SetSettingsService(_settingsService);
         _claudeModelsService = claudeModelsService ?? new ClaudeCodeModelsService();
         _aiService = aiService ?? new AiService();
         _orchestrator = orchestrator ?? new AgentOrchestrator(_queueService, _aiService, instructionsLoader);
+        
+        // 設定から初期値を読み込む
+        var s = _settingsService.Get();
+        KaroExecutionPermissionMode = s.KaroExecutionPermissionMode;
+        UpdateModelInfos(s);
+
         LoadProjects();
         InitializeDummyData();
         RefreshDashboard();
+    }
+
+    partial void OnKaroExecutionPermissionModeChanged(string value)
+    {
+        var s = _settingsService.Get();
+        if (s.KaroExecutionPermissionMode != value)
+        {
+            s.KaroExecutionPermissionMode = value;
+            _settingsService.Save(s);
+            Logger.Log($"家老の権限モードをメイン画面から変更し、即座に保存しました: {value}", LogLevel.Info);
+        }
     }
 
     /// <summary>アプリ終了時に呼ぶ。常駐プロセス・ワーカーを終了する。</summary>
@@ -233,18 +316,29 @@ public partial class MainWindowViewModel : ObservableObject
                         {
                             if (int.TryParse(roleLabel.Substring(2), out var idx))
                             {
-                                pane = idx switch
+                                var leftCount = (TotalAshigaru + 1) / 2;
+                                if (idx <= leftCount)
                                 {
-                                    1 => CenterPane0,
-                                    2 => CenterPane1,
-                                    3 => CenterPane2,
-                                    4 => CenterPane3,
-                                    5 => RightPane0,
-                                    6 => RightPane1,
-                                    7 => RightPane2,
-                                    8 => RightPane3,
-                                    _ => null
-                                };
+                                    pane = (idx - 1) switch
+                                    {
+                                        0 => CenterPane0,
+                                        1 => CenterPane1,
+                                        2 => CenterPane2,
+                                        3 => CenterPane3,
+                                        _ => null
+                                    };
+                                }
+                                else
+                                {
+                                    pane = (idx - leftCount - 1) switch
+                                    {
+                                        0 => RightPane0,
+                                        1 => RightPane1,
+                                        2 => RightPane2,
+                                        3 => RightPane3,
+                                        _ => null
+                                    };
+                                }
                             }
                         }
                         if (pane != null)
@@ -300,7 +394,7 @@ public partial class MainWindowViewModel : ObservableObject
             : ModelFamilyHelper.UpgradeToLatestInFamily(curAshigaru, ids);
         if (modelShogun == current.ModelShogun && modelKaro == current.ModelKaro && modelAshigaru == current.ModelAshigaru)
             return true;
-        _settingsService.Save(new AppSettings
+        var newSettings = new AppSettings
         {
             AshigaruCount = current.AshigaruCount,
             SkillSavePath = current.SkillSavePath,
@@ -317,7 +411,9 @@ public partial class MainWindowViewModel : ObservableObject
             ThinkingAshigaru = current.ThinkingAshigaru,
             ApiEndpoint = current.ApiEndpoint,
             RepoRoot = current.RepoRoot
-        });
+        };
+        _settingsService.Save(newSettings);
+        UpdateModelInfos(newSettings);
         return true;
     }
 
@@ -327,7 +423,10 @@ public partial class MainWindowViewModel : ObservableObject
     {
         DashboardContent = _queueService.ReadDashboardMd();
         if (string.IsNullOrEmpty(DashboardContent))
-            DashboardContent = "（dashboard.md がありません。設定でワークスペースルートを指定してください）";
+        {
+            var repoRoot = _queueService.GetRepoRoot();
+            DashboardContent = $"（dashboard.md がありません。設定でワークスペースルートを指定してください。現在のルート: {repoRoot}）";
+        }
         RefreshAgentPanesFromQueue();
     }
 
@@ -349,27 +448,75 @@ public partial class MainWindowViewModel : ObservableObject
         }
         
         var ashigaruCount = _queueService.GetAshigaruCount();
-        for (var i = 1; i <= ashigaruCount && i + 1 < AgentPanes.Count; i++)
+        var leftCount = (ashigaruCount + 1) / 2;
+        for (var i = 1; i <= ashigaruCount; i++)
         {
+            AgentPaneViewModel? pane = null;
+            if (i <= leftCount)
+            {
+                pane = (i - 1) switch
+                {
+                    0 => CenterPane0,
+                    1 => CenterPane1,
+                    2 => CenterPane2,
+                    3 => CenterPane3,
+                    _ => null
+                };
+            }
+            else
+            {
+                pane = (i - leftCount - 1) switch
+                {
+                    0 => RightPane0,
+                    1 => RightPane1,
+                    2 => RightPane2,
+                    3 => RightPane3,
+                    _ => null
+                };
+            }
+
+            if (pane == null) continue;
+
             // 足軽ペイン：既に「指示待ち」以外のブロックがあればスキップ
-            if (AgentPanes[i + 1].Blocks.Count > 1)
+            if (pane.Blocks.Count > 1)
                 continue;
                 
             var task = _queueService.ReadTaskYaml(i);
             var report = _queueService.ReadReportYaml(i);
             
             if (!string.IsNullOrEmpty(task))
-                AgentPanes[i + 1].Blocks.Add(new PaneBlock { Content = "任務: " + task.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
+                pane.Blocks.Add(new PaneBlock { Content = "任務: " + task.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
             if (!string.IsNullOrEmpty(report))
-                AgentPanes[i + 1].Blocks.Add(new PaneBlock { Content = "報告: " + report.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
+                pane.Blocks.Add(new PaneBlock { Content = "報告: " + report.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
         }
         NotifyPanePropertiesChanged();
+    }
+
+    /// <summary>設定からモデル表示情報を更新する。</summary>
+    private void UpdateModelInfos(AppSettings s)
+    {
+        ModelInfoShogun = GetModelDisplayName(s.ModelShogun, s.ThinkingShogun);
+        ModelInfoKaro = GetModelDisplayName(s.ModelKaro, s.ThinkingKaro);
+        ModelInfoAshigaru = GetModelDisplayName(s.ModelAshigaru, s.ThinkingAshigaru);
+        UpdateAgentPaneModelInfos();
+    }
+
+    private string GetModelDisplayName(string id, bool thinking)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return "未設定";
+        var name = LastFetchedModels?.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase)).Name;
+        if (string.IsNullOrEmpty(name))
+        {
+            name = id.Split('/').Last();
+        }
+        return thinking ? $"{name} (Thinking)" : name;
     }
 
     /// <summary>AIサービスを再初期化する（設定変更後）。</summary>
     public void RefreshAiService()
     {
         _aiService = new AiService();
+        UpdateModelInfos(_settingsService.Get());
     }
 
     /// <summary>プロジェクト一覧を読み込む。</summary>
@@ -388,11 +535,13 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void InitializeDummyData()
     {
-        var paneNames = new List<string> { "将軍", "家老" };
         var ashigaruCount = _queueService.GetAshigaruCount();
+        TotalAshigaru = ashigaruCount;
+
+        var paneNames = new List<string> { "将軍", "家老" };
         for (var i = 1; i <= ashigaruCount; i++)
             paneNames.Add($"足軽{i}");
-        
+
         AgentPanes.Clear();
         foreach (var name in paneNames)
         {
@@ -406,6 +555,7 @@ public partial class MainWindowViewModel : ObservableObject
             });
             AgentPanes.Add(pane);
         }
+        UpdateAgentPaneModelInfos();
 
         NotifyPanePropertiesChanged();
 
@@ -483,13 +633,36 @@ public partial class MainWindowViewModel : ObservableObject
                 });
                 IProgress<string> AshigaruProgressFor(int n)
                 {
-                    var paneIndex = n + 1;
                     return new Progress<string>(msg =>
                     {
                         Dispatcher.UIThread.Post(() =>
                         {
-                            if (AgentPanes.Count > paneIndex)
-                                AgentPanes[paneIndex].Blocks.Add(new PaneBlock { Content = msg, Timestamp = DateTime.Now });
+                            var leftCount = (TotalAshigaru + 1) / 2;
+                            AgentPaneViewModel? pane = null;
+                            if (n <= leftCount)
+                            {
+                                pane = (n - 1) switch
+                                {
+                                    0 => CenterPane0,
+                                    1 => CenterPane1,
+                                    2 => CenterPane2,
+                                    3 => CenterPane3,
+                                    _ => null
+                                };
+                            }
+                            else
+                            {
+                                pane = (n - leftCount - 1) switch
+                                {
+                                    0 => RightPane0,
+                                    1 => RightPane1,
+                                    2 => RightPane2,
+                                    3 => RightPane3,
+                                    _ => null
+                                };
+                            }
+                            if (pane != null)
+                                pane.Blocks.Add(new PaneBlock { Content = msg, Timestamp = DateTime.Now });
                         });
                     });
                 }
@@ -539,6 +712,20 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         await Task.CompletedTask;
+    }
+
+    /// <summary>ブロックID から PaneBlock を検索する。</summary>
+    public PaneBlock? GetPaneBlockById(string blockId)
+    {
+        foreach (var pane in AgentPanes)
+        {
+            foreach (var block in pane.Blocks)
+            {
+                if (block.BlockId == blockId)
+                    return block;
+            }
+        }
+        return null;
     }
 
     /// <summary>AI応答を処理してタスクやコードを抽出する。</summary>

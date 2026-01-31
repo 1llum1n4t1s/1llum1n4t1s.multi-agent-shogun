@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Shogun.Avalonia.Models;
 using Shogun.Avalonia.Util;
+using VYaml.Serialization;
 
 namespace Shogun.Avalonia.Services;
 
@@ -43,16 +45,34 @@ public class AgentOrchestrator : IAgentOrchestrator
         return "エラー: 当アプリでは直接のオーケストレーションは行いません。Claude Code CLI を使用してください。";
     }
 
-    private static string ExtractJsonFromResponse(string response)
+    private static string ExtractYamlFromResponse(string response)
     {
         var trimmed = response.Trim();
-        var match = Regex.Match(trimmed, @"```(?:json)?\s*([\s\S]*?)```", RegexOptions.IgnoreCase);
+        var match = Regex.Match(trimmed, @"```(?:yaml)?\s*([\s\S]*?)```", RegexOptions.IgnoreCase);
         if (match.Success)
             return match.Groups[1].Value.Trim();
-        var start = trimmed.IndexOf('{');
-        var end = trimmed.LastIndexOf('}');
-        if (start >= 0 && end > start)
-            return trimmed.Substring(start, end - start + 1);
+
+        // コードブロックがない場合、YAML らしい開始部分を探す
+        var lines = trimmed.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+        var yamlLines = new List<string>();
+        bool foundStart = false;
+        foreach (var line in lines)
+        {
+            if (!foundStart && (line.TrimStart().StartsWith("tasks:", StringComparison.OrdinalIgnoreCase) || 
+                                line.TrimStart().StartsWith("---") ||
+                                line.TrimStart().StartsWith("worker_id:", StringComparison.OrdinalIgnoreCase) ||
+                                line.TrimStart().StartsWith("task:", StringComparison.OrdinalIgnoreCase)))
+            {
+                foundStart = true;
+            }
+            if (foundStart)
+            {
+                yamlLines.Add(line);
+            }
+        }
+        if (yamlLines.Count > 0)
+            return string.Join("\n", yamlLines);
+
         return trimmed;
     }
 
@@ -60,9 +80,10 @@ public class AgentOrchestrator : IAgentOrchestrator
     {
         try
         {
-            var json = ExtractJsonFromResponse(response);
-            var obj = JsonSerializer.Deserialize<TaskAssignmentJson>(json);
-            return obj?.Assignments;
+            var yaml = ExtractYamlFromResponse(response);
+            var bytes = Encoding.UTF8.GetBytes(yaml);
+            var wrapper = YamlSerializer.Deserialize<TaskAssignmentYaml>(bytes);
+            return wrapper?.Assignments;
         }
         catch
         {
@@ -74,8 +95,9 @@ public class AgentOrchestrator : IAgentOrchestrator
     {
         try
         {
-            var json = ExtractJsonFromResponse(response);
-            return JsonSerializer.Deserialize<AshigaruReportJson>(json);
+            var yaml = ExtractYamlFromResponse(response);
+            var bytes = Encoding.UTF8.GetBytes(yaml);
+            return YamlSerializer.Deserialize<AshigaruReportJson>(bytes);
         }
         catch
         {
