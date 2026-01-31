@@ -3,6 +3,7 @@ claude-shogun-orders.md
 
 # Claude Code settings
 .claude/
+.mcp.json
 
 # Test outputs (generated during testing)
 test_output/
@@ -48,3 +49,6 @@ logs/
 bin/
 obj/
 build_output.txt
+
+# Project details (contains client/confidential info)
+projects/
