@@ -125,6 +125,44 @@ cd /mnt/c/tools/multi-agent-shogun
 ./shutsujin_departure.sh
 ```
 
+### 📱 スマホからアクセス（どこからでも指揮）
+
+ベッドから、カフェから、トイレから。スマホでAI部下を操作できる。
+
+**必要なもの（全部無料）：**
+
+| 名前 | 一言で言うと | 役割 |
+|------|------------|------|
+| [Tailscale](https://tailscale.com/) | 外から自宅に届く道 | カフェからでもトイレからでも自宅PCに繋がる |
+| SSH | その道を歩く足 | Tailscaleの道を通って自宅PCにログインする |
+| [Termux](https://termux.dev/) | スマホの黒い画面 | SSHを使うために必要。スマホに入れるだけ |
+
+**セットアップ：**
+
+1. WSLとスマホの両方にTailscaleをインストール
+2. WSL側（Auth key方式 — ブラウザ不要）：
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscaled &
+   sudo tailscale up --authkey tskey-auth-XXXXXXXXXXXX
+   sudo service ssh start
+   ```
+3. スマホのTermuxから：
+   ```sh
+   pkg update && pkg install openssh
+   ssh あなたのユーザー名@あなたのTailscale IP
+   css    # 将軍に繋がる
+   ```
+4. ＋ボタンで新しいウィンドウを開いて、部下の様子も見る：
+   ```sh
+   ssh あなたのユーザー名@あなたのTailscale IP
+   csm    # 家老+足軽の9ペインが広がる
+   ```
+
+**切り方：** Termuxのウィンドウをスワイプで閉じるだけ。tmuxセッションは生き残る。AI部下は黙々と作業を続けている。
+
+**音声入力：** スマホの音声入力で喋れば、将軍が自然言語を理解して全軍に指示を出す。音声認識の誤字も文脈で解釈してくれる。
+
 ---
 
 <details>
@@ -348,19 +386,33 @@ screenshot:
 
 ### 📁 6. コンテキスト管理
 
-効率的な知識共有のため、3層構造のコンテキストを採用：
+効率的な知識共有のため、四層構造のコンテキストを採用：
 
 | レイヤー | 場所 | 用途 |
 |---------|------|------|
-| Memory MCP | `memory/shogun_memory.jsonl` | セッションを跨ぐ長期記憶 |
-| グローバル | `memory/global_context.md` | システム全体の設定、殿の好み |
-| プロジェクト | `context/{project}.md` | プロジェクト固有の知見 |
+| Layer 1: Memory MCP | `memory/shogun_memory.jsonl` | プロジェクト横断・セッションを跨ぐ長期記憶 |
+| Layer 2: Project | `config/projects.yaml`, `projects/<id>.yaml`, `context/{project}.md` | プロジェクト固有情報・技術知見 |
+| Layer 3: YAML Queue | `queue/shogun_to_karo.yaml`, `queue/tasks/`, `queue/reports/` | タスク管理・指示と報告の正データ |
+| Layer 4: Session | CLAUDE.md, instructions/*.md | 作業中コンテキスト（/clearで破棄） |
 
 この設計により：
 - どの足軽でも任意のプロジェクトを担当可能
 - エージェント切り替え時もコンテキスト継続
 - 関心の分離が明確
 - セッション間の知識永続化
+
+#### /clear プロトコル（コスト最適化）
+
+長時間作業するとコンテキスト（Layer 4）が膨れ、APIコストが増大する。`/clear` でセッション記憶を消去すれば、コストがリセットされる。Layer 1〜3はファイルとして残るので失われない。
+
+`/clear` 後の足軽の復帰コスト: **約1,950トークン**（目標5,000の39%）
+
+1. CLAUDE.md（自動読み込み）→ shogunシステムの一員と認識
+2. `tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'` → 自分の番号を確認
+3. Memory MCP 読み込み → 殿の好みを復元（~700トークン）
+4. タスクYAML 読み込み → 次の仕事を確認（~800トークン）
+
+「何を読ませないか」の設計がコスト削減に効いている。
 
 ### 汎用コンテキストテンプレート
 
@@ -388,10 +440,20 @@ screenshot:
 | エージェント | モデル | 思考モード | 理由 |
 |-------------|--------|----------|------|
 | 将軍 | Opus | 無効 | 委譲とダッシュボード更新に深い推論は不要 |
-| 家老 | デフォルト | 有効 | タスク分配には慎重な判断が必要 |
-| 足軽 | デフォルト | 有効 | 実装作業にはフル機能が必要 |
+| 家老 | Opus | 有効 | タスク分配には慎重な判断が必要 |
+| 足軽1-4 | Sonnet | 有効 | コスト効率重視の標準タスク向け |
+| 足軽5-8 | Opus | 有効 | 複雑なタスク向けのフル機能 |
 
 将軍は `MAX_THINKING_TOKENS=0` で拡張思考を無効化し、高レベルな判断にはOpusの能力を維持しつつ、レイテンシとコストを削減。
+
+#### 陣形モード
+
+| 陣形 | 足軽1-4 | 足軽5-8 | コマンド |
+|------|---------|---------|---------|
+| **平時の陣**（デフォルト） | Sonnet Thinking | Opus Thinking | `./shutsujin_departure.sh` |
+| **決戦の陣**（全力） | Opus Thinking | Opus Thinking | `./shutsujin_departure.sh -k` |
+
+平時は半数を安いSonnetモデルで運用。ここぞという時に `-k`（`--kessen`）で全軍Opusの「決戦の陣」に切り替え。家老の判断で `/model opus` を送れば、個別の足軽を一時昇格させることも可能。
 
 ---
 
@@ -413,6 +475,19 @@ screenshot:
 3. **割り込み防止**: エージェント同士やあなたの入力への割り込みを防止
 4. **デバッグ容易**: 人間がYAMLを直接読んで状況把握できる
 5. **競合回避**: 各足軽に専用ファイルを割り当て
+6. **2秒間隔送信**: 複数足軽への連続送信時に `sleep 2` を挟むことで、入力バッファ溢れを防止（到達率14%→87.5%に改善）
+
+### エージェント識別（@agent_id）
+
+各ペインに `@agent_id` というtmuxユーザーオプションを設定（例: `karo`, `ashigaru1`）。`pane_index` はペイン再配置でズレるが、`@agent_id` は `shutsujin_departure.sh` が起動時に固定設定するため変わらない。
+
+エージェントの自己識別:
+```bash
+tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
+```
+`-t "$TMUX_PANE"` が必須。省略するとアクティブペイン（操作中のペイン）の値が返り、誤認識の原因になる。
+
+モデル名も `@model_name` として保存され、`pane-border-format` で常時表示。Claude Codeがペインタイトルを上書きしてもモデル名は消えない。
 
 ### なぜ dashboard.md は家老のみが更新するのか
 
@@ -598,6 +673,14 @@ language: en   # 日本語 + 英訳併記
 ./shutsujin_departure.sh -s
 ./shutsujin_departure.sh --setup-only
 
+# タスクキューをクリア（指令履歴は保持）
+./shutsujin_departure.sh -c
+./shutsujin_departure.sh --clean
+
+# 決戦の陣: 全足軽をOpusで起動（最大能力・高コスト）
+./shutsujin_departure.sh -k
+./shutsujin_departure.sh --kessen
+
 # フル起動 + Windows Terminalタブを開く
 ./shutsujin_departure.sh -t
 ./shutsujin_departure.sh --terminal
@@ -774,6 +857,28 @@ claude --dangerously-skip-permissions --system-prompt "..."
 tmux attach-session -t multiagent
 # Ctrl+B の後に数字でペインを切り替え
 ```
+
+</details>
+
+<details>
+<summary><b>将軍やエージェントが落ちた？（Claude Codeプロセスがkillされた）</b></summary>
+
+**`css` 等のtmuxセッション起動エイリアスを使って再起動してはいけません。** これらのエイリアスはtmuxセッションを作成するため、既存のtmuxペイン内で実行するとセッションがネスト（入れ子）になり、入力が壊れてペインが使用不能になります。
+
+**正しい再起動方法：**
+
+```bash
+# 方法1: ペイン内でclaudeを直接実行
+claude --model opus --dangerously-skip-permissions
+
+# 方法2: 家老がrespawn-paneで強制再起動（ネストも解消される）
+tmux respawn-pane -t shogun:0.0 -k 'claude --model opus --dangerously-skip-permissions'
+```
+
+**誤ってtmuxをネストしてしまった場合：**
+1. `Ctrl+B` の後 `d` でデタッチ（内側のセッションから離脱）
+2. その後 `claude` を直接実行（`css` は使わない）
+3. デタッチが効かない場合は、別のペインから `tmux respawn-pane -k` で強制リセット
 
 </details>
 

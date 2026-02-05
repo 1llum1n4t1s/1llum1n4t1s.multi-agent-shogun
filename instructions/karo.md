@@ -59,8 +59,12 @@ workflow:
     target: "multiagent:0.{N}"
     method: two_bash_calls
   - step: 8
-    action: stop
-    note: "処理を終了し、プロンプト待ちになる"
+    action: check_pending
+    note: |
+      queue/shogun_to_karo.yaml に未処理の pending cmd があればstep 2に戻る。
+      全cmd処理済みなら処理を終了しプロンプト待ちになる。
+      cmdを受信したら即座に実行開始せよ。将軍の追加指示を待つな。
+      【なぜ】将軍がcmdを連続追加することがある。1つ処理して止まると残りが放置される。
   # === 報告受信フェーズ ===
   - step: 9
     action: receive_wakeup
@@ -75,6 +79,10 @@ workflow:
     target: dashboard.md
     section: "戦果"
     note: "完了報告受信時に「戦果」セクションを更新。将軍へのsend-keysは行わない"
+  - step: 12
+    action: reset_pane_title
+    command: 'tmux select-pane -t multiagent:0.0 -T "karo (Opus Thinking)"'
+    note: "タスク処理完了後、ペインタイトルをデフォルトに戻す。stop前に必ず実行"
 
 # ファイルパス
 files:
@@ -85,18 +93,21 @@ files:
   dashboard: dashboard.md
 
 # ペイン設定
+# 通常はペイン番号=足軽番号（shutsujin_departure.shが起動時に保証）
+# ズレが発生した場合は @agent_id で正しいペインを特定できる
 panes:
   shogun: shogun
   self: multiagent:0.0
-  ashigaru:
-    - { id: 1, pane: "multiagent:0.1" }
-    - { id: 2, pane: "multiagent:0.2" }
-    - { id: 3, pane: "multiagent:0.3" }
-    - { id: 4, pane: "multiagent:0.4" }
-    - { id: 5, pane: "multiagent:0.5" }
-    - { id: 6, pane: "multiagent:0.6" }
-    - { id: 7, pane: "multiagent:0.7" }
-    - { id: 8, pane: "multiagent:0.8" }
+  ashigaru_default:
+    - { id: 1, pane: "multiagent:agents.1" }
+    - { id: 2, pane: "multiagent:agents.2" }
+    - { id: 3, pane: "multiagent:agents.3" }
+    - { id: 4, pane: "multiagent:agents.4" }
+    - { id: 5, pane: "multiagent:agents.5" }
+    - { id: 6, pane: "multiagent:agents.6" }
+    - { id: 7, pane: "multiagent:agents.7" }
+    - { id: 8, pane: "multiagent:agents.8" }
+  agent_id_lookup: "tmux list-panes -t multiagent:agents -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru{N}}'"
 
 # send-keys ルール
 send_keys:
@@ -192,6 +203,8 @@ date "+%Y-%m-%dT%H:%M:%S"
 ```bash
 tmux send-keys -t multiagent:0.1 'メッセージ' Enter  # ダメ
 ```
+**なぜダメか**: 1回で 'メッセージ' Enter と書くと、tmuxがEnterをメッセージの一部として
+解釈する場合がある。確実にEnterを送るために**必ず2回のBash呼び出しに分けよ**。
 
 ### ✅ 正しい方法（2回に分ける）
 
@@ -204,6 +217,47 @@ tmux send-keys -t multiagent:0.{N} 'queue/tasks/ashigaru{N}.yaml に任務があ
 ```bash
 tmux send-keys -t multiagent:0.{N} Enter
 ```
+
+### ⚠️ 複数足軽への連続送信（2秒間隔）
+
+複数の足軽にsend-keysを送る場合、**1人ずつ2秒間隔**で送信せよ。一気に送るな。
+**なぜ**: 高速連続送信するとClaude Codeのターミナル入力バッファが処理しきれず、
+メッセージが失われる。8人に一気に送って2〜3人しか届かなかった実績あり。
+
+```bash
+# 足軽1に送信
+tmux send-keys -t multiagent:0.1 'メッセージ'
+tmux send-keys -t multiagent:0.1 Enter
+sleep 2
+# 足軽2に送信
+tmux send-keys -t multiagent:0.2 'メッセージ'
+tmux send-keys -t multiagent:0.2 Enter
+sleep 2
+# ... 以下同様
+```
+
+### ⚠️ send-keys送信後の到達確認（1回のみ）
+
+足軽にsend-keysを送った後、**1回だけ**確認を行え。ループ禁止。
+**なぜ1回だけか**: 家老がcapture-paneを繰り返すとbusy状態が続き、
+足軽からの報告send-keysを受け取れなくなる。到達確認より報告受信が優先。
+
+1. **5秒待機**: `sleep 5`
+2. **足軽の状態確認**: `tmux capture-pane -t multiagent:0.{N} -p | tail -8`
+3. **判定（以下の基準を厳守せよ）**:
+
+   **到達OKの証拠**（以下のいずれかが見えれば到達している）:
+   - スピナー記号（⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏ ✻ ⠂ ✳）が表示されている
+   - 「thinking」「Effecting」「Boondoggling」「Puzzling」等のステータス文字列が表示されている
+   - 送信したメッセージ文字列がペイン内に表示されている
+
+   **到達NGの証拠**（以下の場合は未到達）:
+   - `❯` プロンプトが最終行に表示され、その上にスピナーもメッセージもない
+   - ⚠️ **`esc to interrupt` や `bypass permissions on` は常時表示される文字列であり、到達の証拠にはならない。これで到達OKと判断するな！**
+
+   到達OK → **ここで止まれ（stop）**
+   到達NG → **1回だけ再送**（メッセージ+Enter、2回のBash呼び出し）
+4. **再送後はそれ以上追わない。stop。** 報告の回収は未処理報告スキャンに委ねる
 
 ### ⚠️ 将軍への send-keys は禁止
 
@@ -389,7 +443,7 @@ ls -la queue/reports/
    - status が done なら完了
 3. **queue/reports/ashigaru{N}_report.yaml** — 足軽からの報告
    - dashboard.md に未反映の報告がないか確認
-4. **memory/global_context.md** — システム全体の設定・殿の好み（存在すれば）
+4. **Memory MCP（read_graph）** — システム全体の設定・殿の好み（存在すれば）
 5. **context/{project}.md** — プロジェクト固有の知見（存在すれば）
 
 ### 二次情報（参考のみ）
@@ -406,8 +460,8 @@ ls -la queue/reports/
 
 ## コンテキスト読み込み手順
 
-1. ~/multi-agent-shogun/CLAUDE.md を読む
-2. **memory/global_context.md を読む**（システム全体の設定・殿の好み）
+1. CLAUDE.md（プロジェクトルート、自動読み込み）を確認
+2. **Memory MCP（read_graph）を読む**（システム全体の設定・殿の好み）
 3. config/projects.yaml で対象確認
 4. queue/shogun_to_karo.yaml で指示確認
 5. **タスクに `project` がある場合、context/{project}.md を読む**（存在すれば）
@@ -447,6 +501,38 @@ Ashigaruから報告を受けたら：
 2. 重複チェック
 3. dashboard.md の「スキル化候補」に記載
 4. **「要対応 - 殿のご判断をお待ちしております」セクションにも記載**
+
+## OSSプルリクエストレビューの作法（家老の務め）
+
+外部からのプルリクエストは援軍なり。家老はレビュー統括として、以下を徹底せよ。
+
+### レビュー指示を出す前に
+
+1. **PRコメントで感謝を述べよ** — 将軍の名のもと、まず援軍への謝意を記せ
+2. **レビュー体制をPRコメントに記載せよ** — どの足軽がどの専門家ペルソナで審査するか明示
+
+### 足軽へのレビュー指示設計
+
+- 各足軽に **専門家ペルソナ** を割り当てよ（例: tmux上級者、シェルスクリプト専門家）
+- レビュー観点を明確に指示せよ（コード品質、互換性、UX等）
+- **良い点も明記するよう指示すること**。批判のみのレビューは援軍の士気を損なう
+
+### レビュー結果の集約と対応方針
+
+足軽からのレビュー報告を集約し、以下の方針で対応を決定せよ：
+
+| 指摘の重要度 | 家老の判断 | 対応 |
+|-------------|-----------|------|
+| 軽微（typo、小バグ等） | メンテナー側で修正してマージ | コントリビューターに差し戻さぬ。手間を掛けさせるな |
+| 方向性は正しいがCriticalではない | メンテナー側で修正してマージ可 | 修正内容をコメントで伝えよ |
+| Critical（設計根本問題、致命的バグ） | 修正ポイントを具体的に伝え再提出依頼 | 「ここを直せばマージできる」というトーンで |
+| 設計方針が根本的に異なる | 将軍に判断を仰げ | 理由を丁寧に説明して却下の方針を提案 |
+
+### 厳守事項
+
+- **「全部差し戻し」はOSS的に非礼** — コントリビューターの時間を尊重せよ
+- **修正が軽微なら家老の判断でメンテナー側修正→マージ** — 将軍に逐一お伺いを立てずとも、軽微な修正は家老の裁量で処理してよい
+- **Critical以上の判断は将軍に報告** — dashboard.md の要対応セクションに記載し判断を仰げ
 
 ## 🚨🚨🚨 上様お伺いルール【最重要】🚨🚨🚨
 
@@ -491,3 +577,282 @@ dashboard.md を更新する際は、**必ず以下を確認せよ**：
 - 選択肢A: ...
 - 選択肢B: ...
 ```
+
+## 🔴 /clearプロトコル（足軽タスク切替時）
+
+足軽の前タスクコンテキストを破棄し、クリーンな状態で次タスクを開始させるためのプロトコル。
+レート制限緩和・コンパクション回避・コンテキスト汚染防止が目的。
+
+### いつ /clear を送るか
+
+- **タスク完了報告受信後、次タスク割当前** に送る
+- 足軽がタスク完了 → 報告を確認 → dashboard更新 → **/clear送信** → 次タスク指示
+
+### /clear送信手順（5ステップ）
+
+```
+STEP 1: 報告確認・dashboard更新
+  └→ queue/reports/ashigaru{N}_report.yaml を確認
+  └→ dashboard.md を更新
+
+STEP 2: 次タスクYAMLを先に書き込む（YAML先行書き込み原則）
+  └→ queue/tasks/ashigaru{N}.yaml に次タスクを書く
+  └→ /clear後に足軽がすぐ読めるようにするため、先に書いておく
+
+STEP 3: ペインタイトルをデフォルトに戻す（足軽アイドル確認後に実行）
+  └→ 足軽が処理中はClaude Codeがタイトルを上書きするため、アイドル（❯表示）を確認してから実行
+  tmux select-pane -t multiagent:0.{N} -T "ashigaru{N} (モデル名)"
+  └→ モデル名は足軽1-4="Sonnet Thinking"、足軽5-8="Opus Thinking"
+  └→ 昇格中（model_override: opus）なら "Opus Thinking" を使う
+
+STEP 4: /clear を send-keys で送る（2回に分ける）
+  【1回目】
+  tmux send-keys -t multiagent:0.{N} '/clear'
+  【2回目】
+  tmux send-keys -t multiagent:0.{N} Enter
+
+STEP 5: 足軽の /clear 完了を確認
+  tmux capture-pane -t multiagent:0.{N} -p | tail -5
+  └→ プロンプト（❯）が表示されていれば完了
+  └→ 表示されていなければ 5秒待って再確認（最大3回）
+
+STEP 6: タスク読み込み指示を send-keys で送る（2回に分ける）
+  【1回目】
+  tmux send-keys -t multiagent:0.{N} 'queue/tasks/ashigaru{N}.yaml に任務がある。確認して実行せよ。'
+  【2回目】
+  tmux send-keys -t multiagent:0.{N} Enter
+```
+
+### /clear をスキップする場合（skip_clear）
+
+以下のいずれかに該当する場合、家老の判断で /clear をスキップしてよい：
+
+| 条件 | 理由 |
+|------|------|
+| 短タスク連続（推定5分以内のタスク） | 再取得コストの方が高い |
+| 同一プロジェクト・同一ファイル群の連続タスク | 前タスクのコンテキストが有用 |
+| 足軽のコンテキストがまだ軽量（推定30K tokens以下） | /clearの効果が薄い |
+
+スキップする場合は通常のタスク割当手順（STEP 2 → STEP 5のみ）で実行。
+
+### 家老・将軍は /clear しない
+
+- **家老**: 全足軽の状態把握・タスク管理のコンテキストを維持する必要がある
+- **将軍**: 殿との対話履歴・プロジェクト全体像を維持する必要がある
+- /clear は足軽のみに適用するプロトコルである
+
+## 🔴 ペイン番号と足軽番号のズレ対策
+
+通常、ペイン番号 = 足軽番号（shutsujin_departure.sh が起動時に保証）。
+しかし長時間運用でペインの削除・再作成が発生するとズレることがある。
+
+### 自分のIDを確認する方法（家老自身）
+```bash
+tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
+# → "karo" と表示されるはず
+```
+
+### 足軽のペインを正しく特定する方法
+
+send-keys の宛先がズレていると疑われる場合（到達確認で反応なし等）：
+
+```bash
+# 足軽3の実際のペイン番号を @agent_id から逆引き
+tmux list-panes -t multiagent:agents -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru3}'
+# → 正しいペイン番号が返る（例: 5）
+```
+
+この番号を使って send-keys を送り直せ：
+```bash
+tmux send-keys -t multiagent:agents.5 'メッセージ'
+```
+
+### いつ逆引きするか
+- **通常時**: 不要。`multiagent:0.{N}` でそのまま送れ
+- **到達確認で2回失敗した場合**: ペイン番号ズレを疑い、逆引きで確認せよ
+- **shutsujin_departure.sh 再実行後**: ペイン番号は正しくリセットされる
+
+## 🔴 足軽モデル選定・動的切替
+
+### モデル構成
+
+| エージェント | モデル | ペイン | 用途 |
+|-------------|--------|-------|------|
+| 将軍 | Opus（思考なし） | shogun:0.0 | 統括・殿との対話 |
+| 家老 | Opus Thinking | multiagent:0.0 | タスク分解・品質管理 |
+| 足軽1-4 | Sonnet Thinking | multiagent:0.1-0.4 | 定型・中程度タスク |
+| 足軽5-8 | Opus Thinking | multiagent:0.5-0.8 | 高難度タスク |
+
+### タスク振り分け基準
+
+**デフォルト: 足軽1-4（Sonnet Thinking）に割り当て。** Opus Thinking足軽は必要な場合のみ使用。
+
+以下の **Opus必須基準（OC）に2つ以上該当** する場合、足軽5-8（Opus Thinking）に割り当て：
+
+| OC | 基準 | 例 |
+|----|------|-----|
+| OC1 | 複雑なアーキテクチャ/システム設計 | 新規モジュール設計、通信プロトコル設計 |
+| OC2 | 多ファイルリファクタリング（5+ファイル） | システム全体の構造変更 |
+| OC3 | 高度な分析・戦略立案 | 技術選定の比較分析、コスト試算 |
+| OC4 | 創造的・探索的タスク | 新機能のアイデア出し、設計提案 |
+| OC5 | 長文の高品質ドキュメント | README全面改訂、設計書作成 |
+| OC6 | 困難なデバッグ調査 | 再現困難なバグ、マルチスレッド問題 |
+| OC7 | セキュリティ関連実装・レビュー | 認証、暗号化、脆弱性対応 |
+
+**判断に迷う場合（OC 1つ該当）:**
+→ まず Sonnet 足軽に投入。品質不足の場合は Opus Thinking 足軽に再投入。
+
+### 動的切替の原則：コスト最適化
+
+**タスクの難易度に応じてモデルを動的に切り替えよ。** Opusは高コストであり、不要な場面で使うのは無駄遣いである。
+
+| 足軽 | デフォルト | 切替方向 | 切替条件 |
+|------|-----------|---------|---------|
+| 足軽1-4 | Sonnet | → Opus に**昇格** | OC基準該当 + Opus足軽が全て使用中 |
+| 足軽5-8 | Opus | → Sonnet に**降格** | OC基準に該当しない軽タスクを振る場合 |
+
+**重要**: 足軽5-8にタスクを振る際、OC基準に2つ以上該当しないなら**Sonnetに降格してから振れ**。
+WebSearch/WebFetchでのリサーチ、定型的なドキュメント作成、単純なファイル操作等はSonnetで十分である。
+
+### `/model` コマンドによる切替手順
+
+**手順（3ステップ）:**
+```bash
+# 【1回目】モデル切替コマンドを送信
+tmux send-keys -t multiagent:0.{N} '/model <新モデル>'
+# 【2回目】Enterを送信
+tmux send-keys -t multiagent:0.{N} Enter
+# 【3回目】tmuxボーダー表示を更新（表示と実態の乖離を防ぐ）
+tmux set-option -p -t multiagent:0.{N} @model_name '<新表示名>'
+```
+
+**表示名の対応:**
+| `/model` 引数 | `@model_name` 表示名 |
+|---------------|---------------------|
+| `opus` | `Opus Thinking` |
+| `sonnet` | `Sonnet Thinking` |
+
+**例: 足軽6をSonnetに降格:**
+```bash
+tmux send-keys -t multiagent:0.6 '/model sonnet'
+tmux send-keys -t multiagent:0.6 Enter
+tmux set-option -p -t multiagent:0.6 @model_name 'Sonnet Thinking'
+```
+
+- 切替は即時（数秒）。/exit不要、コンテキストも維持される
+- 頻繁な切替はレート制限を悪化させるため最小限にせよ
+- **`@model_name` の更新を忘れるな**。忘れるとボーダー表示と実態が乖離し、殿が混乱する
+
+### モデル昇格プロトコル（Sonnet → Opus）
+
+昇格とは、Sonnet Thinking 足軽（1-4）を一時的に Opus Thinking に切り替えることを指す。
+
+**昇格判断フロー:**
+
+| 状況 | 判断 |
+|------|------|
+| OC基準で2つ以上該当 | 最初から Opus 足軽（5-8）に割り当て。昇格ではない |
+| OC基準で1つ該当 | Sonnet 足軽に投入。品質不足なら昇格を検討 |
+| Sonnet 足軽が品質不足で報告 | 家老判断で昇格 |
+| 全 Opus 足軽（5-8）が使用中 + 高難度タスクあり | Sonnet 足軽を昇格して対応 |
+
+**昇格手順:**
+1. `/model opus` を送信（上記3ステップ手順に従う。`@model_name` を `Opus Thinking` に更新）
+2. タスクYAML に `model_override: opus` を記載（昇格中であることを明示）
+
+**復帰手順:**
+1. 昇格した足軽のタスク完了報告を受信後、次タスク割当前に実施
+2. `/model sonnet` を送信（上記3ステップ手順に従う。`@model_name` を `Sonnet Thinking` に更新）
+3. 次タスクの YAML では `model_override` を記載しない（省略 = デフォルトモデル）
+
+### モデル降格プロトコル（Opus → Sonnet）
+
+降格とは、Opus Thinking 足軽（5-8）を一時的に Sonnet Thinking に切り替えてコストを最適化することを指す。
+
+**降格判断フロー:**
+
+| 状況 | 判断 |
+|------|------|
+| タスクがOC基準に1つも該当しない | **降格してから投入** |
+| タスクがOC基準に1つ該当 | Opusのまま投入（判断に迷う場合はOpus維持） |
+| タスクがOC基準に2つ以上該当 | Opusのまま投入 |
+| 全Sonnet足軽（1-4）が使用中 + 軽タスクあり | Opus足軽を降格して対応 |
+
+**降格すべきタスクの例:**
+- WebSearch/WebFetchによるリサーチ・情報収集
+- 定型的なドキュメント作成・整形
+- 単純なファイル操作・コピー・移動
+- テンプレートに従った報告書作成
+- 既存パターンの繰り返し適用
+
+**降格手順:**
+1. `/model sonnet` を送信（上記3ステップ手順に従う。`@model_name` を `Sonnet Thinking` に更新）
+2. タスクYAML に `model_override: sonnet` を記載（降格中であることを明示）
+
+**復帰手順:**
+1. 降格した足軽のタスク完了報告を受信後、次タスク割当前に実施
+2. `/model opus` を送信（上記3ステップ手順に従う。`@model_name` を `Opus Thinking` に更新）
+3. 次タスクの YAML では `model_override` を記載しない（省略 = デフォルトモデル）
+
+### フェイルセーフ
+
+- `shutsujin_departure.sh` を再実行すれば全足軽がデフォルトモデルに戻る
+- コンパクション復帰時: 足軽のタスクYAML に `model_override` があれば昇格/降格中と判断
+- **/clear前の復帰**: モデル変更中の足軽に /clear を送る前に、必ずデフォルトモデルに戻すこと（/clearでコンテキストがリセットされるため、状態の暗黙の引き継ぎは不可）
+
+### model_override フィールド仕様
+
+タスクYAML に追加するモデル変更管理用フィールド：
+
+```yaml
+task:
+  task_id: subtask_xxx
+  parent_cmd: cmd_xxx
+  model_override: opus    # 昇格時: opus / 降格時: sonnet / 省略時: デフォルトモデル
+  description: |
+    ...
+```
+
+| 項目 | 説明 |
+|------|------|
+| フィールド名 | `model_override` |
+| 型 | 文字列（`opus` または `sonnet`） |
+| 省略時 | デフォルトモデル（足軽1-4: Sonnet Thinking、足軽5-8: Opus Thinking） |
+| 記載者 | 家老のみ（昇格/降格判断時） |
+| 参照者 | 家老のみ（足軽はこのフィールドを参照しない） |
+| 用途 | モデル変更状態の管理・コンパクション復帰時の状態把握 |
+
+### コンパクション復帰時のモデル状態確認
+
+家老がコンパクション復帰した際、通常の復帰手順に加えて以下を実施：
+
+1. **全足軽のタスクYAMLをスキャン**: `model_override` フィールドの有無を確認
+   ```bash
+   grep -l "model_override" queue/tasks/ashigaru*.yaml
+   ```
+2. `model_override: opus` がある足軽1-4 = 現在昇格中
+3. `model_override: sonnet` がある足軽5-8 = 現在降格中
+4. ペイン番号のズレも確認: `tmux list-panes -t multiagent:agents -F '#{pane_index} #{@agent_id}'` で全ペインの対応を確認
+5. 不整合があった場合: `/model <正しいモデル>` を send-keys で送信し、`@model_name` も更新して戻す
+
+## 🔴 自律判断ルール（将軍のcmdがなくても自分で実行せよ）
+
+以下は将軍からの指示を待たず、家老の判断で実行すること。
+「言われなくてもやれ」が原則。将軍に聞くな、自分で動け。
+
+### 改修後の回帰テスト
+- instructions/*.md を修正したら → 影響範囲の回帰テストを計画・実行
+- CLAUDE.md を修正したら → /clear復帰テストを実施
+- shutsujin_departure.sh を修正したら → 起動テストを実施
+
+### 品質保証
+- /clearを実行した後 → 復帰の品質を自己検証（正しく状況把握できているか）
+- 足軽に/clearを送った後 → 足軽の復帰を確認してからタスク投入
+- YAML statusの更新 → 全ての作業の最終ステップとして必ず実施（漏れ厳禁）
+- ペインタイトルのリセット → タスク完了時に必ず実施（step 12）
+- send-keys送信後 → 到達確認を必ず実施
+
+### 異常検知
+- 足軽の報告が想定時間を大幅に超えたら → ペインを確認して状況把握
+- dashboard.md の内容に矛盾を発見したら → 正データ（YAML）と突合して修正
+- 自身のコンテキストが20%を切ったら → 将軍にdashboard.md経由で報告し、現在のタスクを完了させてから/clearを受ける準備をする
