@@ -24,6 +24,7 @@ public partial class MainWindow : Window
         InitializeComponent();
         Opened += OnOpened;
         Closed += OnClosed;
+        SizeChanged += OnWindowSizeChanged;
     }
 
     /// <summary>ウィンドウ閉鎖時、常駐プロセスを終了する。</summary>
@@ -158,6 +159,15 @@ public partial class MainWindow : Window
         if (sender is ScrollViewer sv && e.ExtentDelta.Length > 0)
         {
             sv.ScrollToEnd();
+        }
+    }
+
+    /// <summary>ウィンドウサイズ変更時にレスポンシブレイアウトを切り替える。</summary>
+    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+        {
+            vm.IsWideLayout = e.NewSize.Width >= 1050;
         }
     }
 }

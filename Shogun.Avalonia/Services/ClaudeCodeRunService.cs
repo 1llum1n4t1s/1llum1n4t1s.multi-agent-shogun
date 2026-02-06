@@ -20,6 +20,8 @@ public class ClaudeCodeRunService : IClaudeCodeRunService
 重要: あなたの現在の作業ディレクトリ（CWD）はプロジェクトのルートディレクトリである。
 queue/shogun_to_karo.yaml は、カレントディレクトリからの相対パスでアクセスせよ。
 
+最重要: status が pending のコマンドのみを処理せよ。status が done のコマンドは既に処理済みなので無視すること。
+
 ```yaml
 tasks:
   - ashigaru_id: 1

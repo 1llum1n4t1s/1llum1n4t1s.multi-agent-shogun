@@ -87,6 +87,12 @@ public class ShogunQueueService : IShogunQueueService
                 int.TryParse(item.Id.AsSpan(4), out var n) && n > maxNum)
                 maxNum = n;
         }
+        // 古い pending コマンドを done にマークし、家老が新しいコマンドだけを拾うようにする
+        foreach (var item in list)
+        {
+            if (string.Equals(item.Status, "pending", StringComparison.OrdinalIgnoreCase))
+                item.Status = "done";
+        }
         var id = $"cmd_{maxNum + 1:D3}";
         var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         list.Add(new ShogunCommand

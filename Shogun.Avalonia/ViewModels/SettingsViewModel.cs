@@ -169,10 +169,13 @@ public partial class SettingsViewModel : ObservableObject
             ModelAshigaru = ModelFamilyHelper.GetLatestIdInFamilyBySort(ids, "haiku") ?? ids.FirstOrDefault() ?? string.Empty;
     }
 
-    /// <summary>AllModelOptions を MODEL（DisplayName）昇順でソートする。</summary>
+    /// <summary>AllModelOptions を MODEL（DisplayName）昇順でソートする。
+    /// Clear() による SelectedItem null 化を防ぐため、呼び出し元で ID 退避・復元を行うこと。</summary>
     private void SortAllModelOptionsByDisplayName()
     {
         var sorted = AllModelOptions.OrderBy(x => x.DisplayName, StringComparer.Ordinal).ToList();
+        // 呼び出し元で ModelShogun/Karo/Ashigaru の退避・復元を行っているため、
+        // ここでの Clear() による SelectedModel* null 化は問題ない。
         AllModelOptions.Clear();
         foreach (var o in sorted)
             AllModelOptions.Add(o);
@@ -245,11 +248,20 @@ public partial class SettingsViewModel : ObservableObject
     public void SetInitialModels(IReadOnlyList<(string Id, string Name)>? models)
     {
         if (models == null || models.Count == 0) return;
+
+        // Clear() で SelectedModel* → null → ModelShogun/Karo/Ashigaru が空になる問題を回避
+        var savedShogun = ModelShogun;
+        var savedKaro = ModelKaro;
+        var savedAshigaru = ModelAshigaru;
+
         AllModelOptions.Clear();
         foreach (var m in models)
             AllModelOptions.Add(new ModelOption(m.Id, m.Name));
         SortAllModelOptionsByDisplayName();
-        // ApplyDefaultModelsIfEmpty(); // 読み込み時に勝手に補完しないようにコメントアウト
+
+        ModelShogun = savedShogun;
+        ModelKaro = savedKaro;
+        ModelAshigaru = savedAshigaru;
         SyncSelectedFromIds();
     }
 
@@ -264,14 +276,25 @@ public partial class SettingsViewModel : ObservableObject
             var models = await _claudeModelsService.GetModelsAsync().ConfigureAwait(false);
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
+                // Clear() すると SelectedModel* が null に飛び、OnSelectedModel*Changed 経由で
+                // ModelShogun/Karo/Ashigaru が空文字に上書きされてしまう。
+                // 事前に保存済み ID を退避し、Clear→再構築後に復元する。
+                var savedShogun = ModelShogun;
+                var savedKaro = ModelKaro;
+                var savedAshigaru = ModelAshigaru;
+
                 AllModelOptions.Clear();
                 if (models.Count > 0)
                 {
                     foreach (var m in models)
                         AllModelOptions.Add(new ModelOption(m.Id, m.Name));
                     SortAllModelOptionsByDisplayName();
-                    // ApplyDefaultModelsIfEmpty(); // 読み込み時に勝手に補完しないようにコメントアウト
                 }
+
+                // 退避した ID を復元してから同期する
+                ModelShogun = savedShogun;
+                ModelKaro = savedKaro;
+                ModelAshigaru = savedAshigaru;
                 SyncSelectedFromIds();
             });
         }

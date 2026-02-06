@@ -56,13 +56,34 @@ public partial class MainWindowViewModel : ObservableObject
     public AgentPaneViewModel? LeftPane0 => AgentPanes.Count > 0 ? AgentPanes[0] : null;
     public AgentPaneViewModel? LeftPane1 => AgentPanes.Count > 1 ? AgentPanes[1] : null;
 
-    /// <summary>中央ペイン用（足軽1～N/2）。</summary>
+    /// <summary>中央ペイン用（足軽1～N/2）。実際に表示すべきペインのみ含む。</summary>
+    public ObservableCollection<AgentPaneViewModel> CenterPanes { get; } = new();
+
+    /// <summary>右ペイン用（足軽N/2+1～N）。実際に表示すべきペインのみ含む。</summary>
+    public ObservableCollection<AgentPaneViewModel> RightPanes { get; } = new();
+
+    /// <summary>中央/右ペインのコレクションを AgentPanes と TotalAshigaru に基づいて再構築する。</summary>
+    private void RebuildCenterRightPanes()
+    {
+        CenterPanes.Clear();
+        RightPanes.Clear();
+        if (AgentPanes.Count < 3) return;
+        var leftCount = (TotalAshigaru + 1) / 2;
+        for (var i = 0; i < leftCount && i + 2 < AgentPanes.Count; i++)
+            CenterPanes.Add(AgentPanes[i + 2]);
+        var rightStart = 2 + leftCount;
+        var rightCount = TotalAshigaru / 2;
+        for (var i = 0; i < rightCount && rightStart + i < AgentPanes.Count; i++)
+            RightPanes.Add(AgentPanes[rightStart + i]);
+    }
+
+    /// <summary>中央ペイン用（足軽1～N/2）。個別プロパティは進捗コールバックで引き続き使用。</summary>
     public AgentPaneViewModel? CenterPane0 => AgentPanes.Count > 2 ? AgentPanes[2] : null;
     public AgentPaneViewModel? CenterPane1 => AgentPanes.Count > 3 ? AgentPanes[3] : null;
     public AgentPaneViewModel? CenterPane2 => AgentPanes.Count > 4 ? AgentPanes[4] : null;
     public AgentPaneViewModel? CenterPane3 => AgentPanes.Count > 5 ? AgentPanes[5] : null;
 
-    /// <summary>右ペイン用（足軽N/2+1～N）。</summary>
+    /// <summary>右ペイン用（足軽N/2+1～N）。個別プロパティは進捗コールバックで引き続き使用。</summary>
     public AgentPaneViewModel? RightPane0
     {
         get
@@ -108,6 +129,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(RightPane1));
         OnPropertyChanged(nameof(RightPane2));
         OnPropertyChanged(nameof(RightPane3));
+        RebuildCenterRightPanes();
     }
 
     [ObservableProperty]
@@ -176,6 +198,10 @@ public partial class MainWindowViewModel : ObservableObject
     /// <summary>実行中のモデル情報（足軽）。</summary>
     [ObservableProperty]
     private string _modelInfoAshigaru = string.Empty;
+
+    /// <summary>ワイドレイアウト（3カラム表示）か。ウィンドウ幅 >= 1050px で true。</summary>
+    [ObservableProperty]
+    private bool _isWideLayout = true;
 
     /// <summary>起動準備中（Node.js / Claude Code の確認・インストール）か。</summary>
     [ObservableProperty]
@@ -343,7 +369,10 @@ public partial class MainWindowViewModel : ObservableObject
                             }
                         }
                         if (pane != null)
+                        {
+                            pane.AgentStatus = "active";
                             pane.Blocks.Add(new PaneBlock { Content = message, Timestamp = DateTime.Now });
+                        }
                     });
                     await Task.CompletedTask.ConfigureAwait(false);
                 }
@@ -441,69 +470,6 @@ public partial class MainWindowViewModel : ObservableObject
             }
         }
         DashboardContent = content;
-        RefreshAgentPanesFromQueue();
-    }
-
-    /// <summary>queue/tasks と queue/reports から各ペインの表示を更新する。ブロックが空の場合のみ追加。</summary>
-    private void RefreshAgentPanesFromQueue()
-    {
-        if (AgentPanes.Count < 2)
-            return;
-        
-        // 家老のペイン：既に「指示待ち」以外のブロックがあれば更新しない
-        if (AgentPanes[1].Blocks.Count <= 1)
-        {
-            var commands = _queueService.ReadShogunToKaro().Take(3).ToList();
-            if (commands.Any())
-            {
-                var karoContent = "queue/shogun_to_karo.yaml の最新: " + string.Join("; ", commands.Select(c => c.Id + " " + c.Command));
-                AgentPanes[1].Blocks.Add(new PaneBlock { Content = karoContent, Timestamp = DateTime.Now });
-            }
-        }
-        
-        var ashigaruCount = _queueService.GetAshigaruCount();
-        var leftCount = (ashigaruCount + 1) / 2;
-        for (var i = 1; i <= ashigaruCount; i++)
-        {
-            AgentPaneViewModel? pane = null;
-            if (i <= leftCount)
-            {
-                pane = (i - 1) switch
-                {
-                    0 => CenterPane0,
-                    1 => CenterPane1,
-                    2 => CenterPane2,
-                    3 => CenterPane3,
-                    _ => null
-                };
-            }
-            else
-            {
-                pane = (i - leftCount - 1) switch
-                {
-                    0 => RightPane0,
-                    1 => RightPane1,
-                    2 => RightPane2,
-                    3 => RightPane3,
-                    _ => null
-                };
-            }
-
-            if (pane == null) continue;
-
-            // 足軽ペイン：既に「指示待ち」以外のブロックがあればスキップ
-            if (pane.Blocks.Count > 1)
-                continue;
-                
-            var task = _queueService.ReadTaskYaml(i);
-            var report = _queueService.ReadReportYaml(i);
-            
-            if (!string.IsNullOrEmpty(task))
-                pane.Blocks.Add(new PaneBlock { Content = "任務: " + task.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
-            if (!string.IsNullOrEmpty(report))
-                pane.Blocks.Add(new PaneBlock { Content = "報告: " + report.Trim().Replace("\r\n", " ").Replace("\n", " "), Timestamp = DateTime.Now });
-        }
-        NotifyPanePropertiesChanged();
     }
 
     /// <summary>設定からモデル表示情報を更新する。</summary>
@@ -617,7 +583,10 @@ public partial class MainWindowViewModel : ObservableObject
         ChatMessages.Add(userMessage);
 
         if (AgentPanes.Count > 0)
+        {
+            AgentPanes[0].AgentStatus = "active";
             AgentPanes[0].Blocks.Add(new PaneBlock { Content = inputCopy, Timestamp = DateTime.Now });
+        }
 
         try
         {
@@ -645,7 +614,10 @@ public partial class MainWindowViewModel : ObservableObject
                     Dispatcher.UIThread.Post(() =>
                     {
                         if (AgentPanes.Count > 1)
+                        {
+                            AgentPanes[1].AgentStatus = "active";
                             AgentPanes[1].Blocks.Add(new PaneBlock { Content = msg, Timestamp = DateTime.Now });
+                        }
                     });
                 });
                 var reportProgress = new Progress<string>(msg =>
@@ -687,7 +659,10 @@ public partial class MainWindowViewModel : ObservableObject
                                 };
                             }
                             if (pane != null)
+                            {
+                                pane.AgentStatus = "active";
                                 pane.Blocks.Add(new PaneBlock { Content = msg, Timestamp = DateTime.Now });
+                            }
                         });
                     });
                 }
@@ -734,6 +709,8 @@ public partial class MainWindowViewModel : ObservableObject
         finally
         {
             IsAiProcessing = false;
+            foreach (var pane in AgentPanes)
+                pane.AgentStatus = "idle";
         }
 
         await Task.CompletedTask;

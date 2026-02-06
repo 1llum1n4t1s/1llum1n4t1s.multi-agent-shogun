@@ -510,12 +510,17 @@ function runResidentKaroJob(job, jobCwd) {
     }
     const args = [cliJs];
     if (appendPrompt) args.push('--append-system-prompt', appendPrompt);
-    if (addDir.trim()) {
-      args.push('--add-dir', addDir.trim());
-      if (!skipPermissions) {
-        const normalizedPath = addDir.trim().replace(/\\\\/g, '/');
-        args.push('--allowedTools', 'Read', 'Edit(' + normalizedPath + '/*)', 'Write(' + normalizedPath + '/*)');
-      }
+    const addDirsR = new Set();
+    if (addDir.trim()) addDirsR.add(addDir.trim());
+    if (jobCwd && jobCwd !== cwd) addDirsR.add(jobCwd);
+    for (const d of addDirsR) {
+      args.push('--add-dir', d);
+    }
+    if (!skipPermissions && addDirsR.size > 0) {
+      const allowedPaths = [...addDirsR].map(d => d.replace(/\\\\/g, '/'));
+      const editArgs = allowedPaths.flatMap(p => ['Edit(' + p + '/*)', 'Edit(' + p + '/**)']);
+      const writeArgs = allowedPaths.flatMap(p => ['Write(' + p + '/*)', 'Write(' + p + '/**)']);
+      args.push('--allowedTools', 'Read', 'Bash', ...editArgs, ...writeArgs);
     }
     if (skipPermissions) args.push('--dangerously-skip-permissions');
     if (modelId) args.push('--model', modelId);
@@ -625,12 +630,17 @@ rl.on('line', (line) => {
     }
 
     const args = [cliJs, '-p', prompt, '--append-system-prompt-file', systemPromptFile];
-    if (addDir.trim()) {
-      args.push('--add-dir', addDir.trim());
-      if (!skipPermissions) {
-        const normalizedPath = addDir.trim().replace(/\\\\/g, '/');
-        args.push('--allowedTools', 'Read', 'Edit(' + normalizedPath + '/*)', 'Write(' + normalizedPath + '/*)');
-      }
+    const addDirs = new Set();
+    if (addDir.trim()) addDirs.add(addDir.trim());
+    if (jobCwd && jobCwd !== cwd) addDirs.add(jobCwd);
+    for (const d of addDirs) {
+      args.push('--add-dir', d);
+    }
+    if (!skipPermissions && addDirs.size > 0) {
+      const allowedPaths = [...addDirs].map(d => d.replace(/\\\\/g, '/'));
+      const editArgs = allowedPaths.flatMap(p => ['Edit(' + p + '/*)', 'Edit(' + p + '/**)']);
+      const writeArgs = allowedPaths.flatMap(p => ['Write(' + p + '/*)', 'Write(' + p + '/**)']);
+      args.push('--allowedTools', 'Read', 'Bash', ...editArgs, ...writeArgs);
     }
     if (skipPermissions) {
       args.push('--dangerously-skip-permissions');
