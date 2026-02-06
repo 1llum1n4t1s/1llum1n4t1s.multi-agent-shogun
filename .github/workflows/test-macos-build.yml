@@ -1,0 +1,75 @@
+name: macOS ビルドテスト
+
+on:
+  push:
+    branches:
+      - 'claude/test-github-actions-macos-*'
+  pull_request:
+    branches:
+      - 'claude/test-github-actions-macos-*'
+
+jobs:
+  build-macos-x64:
+    name: macOS x64 ビルド
+    runs-on: macos-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 依存関係を復元
+        run: dotnet restore Shogun.Avalonia.slnx
+
+      - name: ビルド (デフォルト)
+        run: dotnet build Shogun.Avalonia.slnx --configuration Release --no-restore
+
+      - name: パブリッシュ (osx-x64)
+        run: |
+          dotnet publish Shogun.Avalonia/Shogun.Avalonia.csproj \
+            -c Release \
+            -r osx-x64 \
+            --self-contained false
+
+      - name: ビルド成果物を確認
+        run: |
+          echo "=== osx-x64 publish output ==="
+          ls -la Shogun.Avalonia/bin/Release/net10.0/osx-x64/publish/ || echo "publish directory not found"
+
+  build-macos-arm64:
+    name: macOS arm64 ビルド
+    runs-on: macos-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: 依存関係を復元
+        run: dotnet restore Shogun.Avalonia.slnx
+
+      - name: ビルド (arm64 向け、PlatformTarget 上書き)
+        run: |
+          dotnet build Shogun.Avalonia.slnx \
+            --configuration Release \
+            --no-restore \
+            -p:PlatformTarget=arm64
+
+      - name: パブリッシュ (osx-arm64)
+        run: |
+          dotnet publish Shogun.Avalonia/Shogun.Avalonia.csproj \
+            -c Release \
+            -r osx-arm64 \
+            --self-contained false \
+            -p:PlatformTarget=arm64
+
+      - name: ビルド成果物を確認
+        run: |
+          echo "=== osx-arm64 publish output ==="
+          ls -la Shogun.Avalonia/bin/Release/net10.0/osx-arm64/publish/ || echo "publish directory not found"
